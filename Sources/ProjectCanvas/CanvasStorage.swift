@@ -26,16 +26,27 @@ final class CanvasStorage {
               Set(data.groups.map(\.id)).count == data.groups.count else { throw StorageError.invalidReferences }
         guard data.projects.allSatisfy({ project in
             let links = project.links ?? []
-            return links.allSatisfy { $0.validatedURL != nil } && Set(links.map(\.id)).count == links.count
+            let configurations = project.launchConfigurations
+            return links.allSatisfy { $0.validatedURL != nil } && Set(links.map(\.id)).count == links.count &&
+                configurations.allSatisfy(\.isValid) && Set(configurations.map(\.id)).count == configurations.count &&
+                project.openCount >= 0 && (project.lastOpenedAt?.timeIntervalSince1970.isFinite ?? true)
         }) else { throw StorageError.invalidReferences }
         for group in data.groups {
             let cards = Set(group.cards.map(\.id))
             guard cards.count == group.cards.count,
                   Set(group.connections.map(\.id)).count == group.connections.count,
-                  group.cards.allSatisfy({ projectIDs.contains($0.projectID) && $0.x.isFinite && $0.y.isFinite }),
+                  group.cards.allSatisfy({ card in
+                      let validContent = card.clipboard.map { card.projectID == nil && $0.isValid }
+                          ?? card.projectID.map { projectIDs.contains($0) } ?? false
+                      return validContent && card.x.isFinite && card.y.isFinite
+                  }),
+                  group.cards.compactMap(\.clipboard).reduce(0, { $0 + $1.byteCount }) <= 64 * 1024 * 1024,
                   group.connections.allSatisfy({ cards.contains($0.fromCardID) && cards.contains($0.toCardID) }) else { throw StorageError.invalidReferences }
             guard Set(group.regions.map(\.id)).count == group.regions.count,
                   group.regions.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !$0.cardIDs.isEmpty && cards.isSuperset(of: $0.cardIDs) }) else { throw StorageError.invalidReferences }
+            if let offset = group.coordinateOffset {
+                guard offset.x.isFinite && offset.y.isFinite else { throw StorageError.invalidReferences }
+            }
             if let viewport = group.viewport {
                 guard viewport.zoom.isFinite && viewport.zoom > 0 && viewport.offsetX.isFinite && viewport.offsetY.isFinite else { throw StorageError.invalidReferences }
             }

@@ -85,13 +85,13 @@ final class AppModel: ObservableObject {
     func undo() {
         guard let previous = undoStack.popLast() else { return }
         redoStack.append(currentSnapshot)
-        restore(previous)
+        restore(previous, preservingUsage: true)
     }
 
     func redo() {
         guard let next = redoStack.popLast() else { return }
         undoStack.append(currentSnapshot)
-        restore(next)
+        restore(next, preservingUsage: true)
     }
 
     func addGroup() {
@@ -191,6 +191,44 @@ final class AppModel: ObservableObject {
         persist()
     }
 
+    func copyClipboardContent(_ content: CanvasClipboardContent) {
+        if !content.copy() { alertMessage = L10n.tr("复制失败，请重试") }
+    }
+
+    @discardableResult func addClipboardItem(_ item: ClipboardCanvasTransfer, to groupID: UUID, at position: CGPoint? = nil) -> Bool {
+        let content: CanvasClipboardContent
+        switch item.kind {
+        case .text:
+            guard let entry = clipboardHistory.texts.first(where: { $0.id == item.id }) else { return false }
+            content = .text(entry.text)
+        case .image:
+            guard let entry = clipboardHistory.images.first(where: { $0.id == item.id }),
+                  let tiff = entry.thumbnail.tiffRepresentation,
+                  let preview = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return false }
+            content = .image(data: entry.data, type: entry.type.rawValue, preview: preview)
+        }
+        return addClipboardContent(content, to: groupID, at: position)
+    }
+
+    @discardableResult func addClipboardContent(_ content: CanvasClipboardContent, to groupID: UUID, at position: CGPoint? = nil) -> Bool {
+        guard content.isValid, let index = groups.firstIndex(where: { $0.id == groupID }) else { return false }
+        guard groups[index].cards.compactMap(\.clipboard).reduce(content.byteCount, { $0 + $1.byteCount }) <= 64 * 1024 * 1024 else {
+            alertMessage = L10n.tr("画布内容已达到 64 MB，请先删除部分图片或文字。")
+            return false
+        }
+        let point = position ?? CGPoint(x: 96, y: (groups[index].cards.map(\.y).max() ?? -36) + 132)
+        guard point.x.isFinite && point.y.isFinite else { return false }
+        let card = ProjectCard(clipboard: content, x: max(20, point.x), y: max(20, point.y))
+        recordUndo()
+        groups[index].cards.append(card)
+        persist()
+        if position == nil {
+            selectedGroupID = groupID
+            locateRequest = CanvasLocateRequest(groupID: groupID, cardID: card.id)
+        }
+        return true
+    }
+
     func removeCards(_ ids: Set<UUID>, from groupID: UUID) {
         guard !ids.isEmpty, let index = groups.firstIndex(where: { $0.id == groupID }), groups[index].cards.contains(where: { ids.contains($0.id) }) else { return }
         recordUndo()
@@ -203,6 +241,34 @@ final class AppModel: ObservableObject {
     func moveCard(_ cardID: UUID, to position: CGPoint, in groupID: UUID) {
         guard let card = groups.first(where: { $0.id == groupID })?.cards.first(where: { $0.id == cardID }) else { return }
         moveCards(ids: [cardID], by: CGSize(width: position.x - card.x, height: position.y - card.y), in: groupID)
+    }
+
+    /// Expands the canvas when a centered desktop card crosses its coordinate origin.
+    func moveDesktopCard(_ cardID: UUID, to position: CGPoint, in groupID: UUID) {
+        guard position.x.isFinite, position.y.isFinite,
+              let groupIndex = groups.firstIndex(where: { $0.id == groupID }),
+              let cardIndex = groups[groupIndex].cards.firstIndex(where: { $0.id == cardID }) else { return }
+        var group = groups[groupIndex]
+        guard group.cards[cardIndex].x != position.x || group.cards[cardIndex].y != position.y else { return }
+        let shift = CGPoint(x: max(0, 20 - position.x), y: max(0, 20 - position.y))
+        group.cards[cardIndex].x = position.x
+        group.cards[cardIndex].y = position.y
+        if shift != .zero {
+            for index in group.cards.indices {
+                group.cards[index].x += shift.x
+                group.cards[index].y += shift.y
+            }
+            let previousOffset = group.coordinateOffset ?? .zero
+            group.coordinateOffset = CGPoint(x: previousOffset.x + shift.x, y: previousOffset.y + shift.y)
+            if var viewport = group.viewport {
+                viewport.offsetX += shift.x * viewport.zoom
+                viewport.offsetY += shift.y * viewport.zoom
+                group.viewport = viewport
+            }
+        }
+        recordUndo()
+        groups[groupIndex] = group
+        persist()
     }
 
     func moveCards(ids: Set<UUID>, by offset: CGSize, in groupID: UUID) {
@@ -252,7 +318,8 @@ final class AppModel: ObservableObject {
                 guard let project = project(for: card), query.isEmpty ||
                         (card.customName ?? "").localizedCaseInsensitiveContains(query) ||
                         project.folderName.localizedCaseInsensitiveContains(query) ||
-                        project.folderPath.localizedCaseInsensitiveContains(query) else { return nil }
+                        project.folderPath.localizedCaseInsensitiveContains(query) ||
+                        project.tags.contains(where: { $0.localizedCaseInsensitiveContains(query) }) else { return nil }
                 return ProjectSearchResult(groupID: group.id, groupName: group.name, card: card, project: project)
             }
         }
@@ -263,17 +330,92 @@ final class AppModel: ObservableObject {
         locateRequest = CanvasLocateRequest(groupID: result.groupID, cardID: result.card.id)
     }
 
-    @discardableResult func saveProjectDetails(_ id: UUID, notes: String, links: [ProjectLink]) -> Bool {
+    @discardableResult func saveProjectDetails(_ id: UUID, notes: String, links: [ProjectLink], tags: [String]? = nil, configurations: [LaunchConfiguration]? = nil) -> Bool {
         guard let index = projects.firstIndex(where: { $0.id == id }) else { return false }
         guard links.allSatisfy({ $0.validatedURL != nil }), Set(links.map(\.id)).count == links.count else {
             alertMessage = L10n.tr("链接需要名称和有效的 HTTP 或 HTTPS 地址。"); return false
         }
-        guard projects[index].notes != notes || projects[index].links != links else { return true }
+        let configurations = configurations ?? projects[index].launchConfigurations
+        guard configurations.allSatisfy(\.isValid), Set(configurations.map(\.id)).count == configurations.count else {
+            alertMessage = L10n.tr("启动配置需要名称、命令和有效的环境变量名称。"); return false
+        }
+        var seen = Set<String>()
+        let tags = (tags ?? projects[index].tags).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+        guard projects[index].notes != notes || projects[index].links != links ||
+                projects[index].tags != tags || projects[index].launchConfigurations != configurations else { return true }
         recordUndo()
         projects[index].notes = notes
         projects[index].links = links
+        projects[index].tags = tags
+        projects[index].launchConfigurations = configurations
         persist()
         return true
+    }
+
+    @discardableResult func saveProjectWorkflow(_ id: UUID, tags: [String], configurations: [LaunchConfiguration]) -> Bool {
+        guard let project = projects.first(where: { $0.id == id }) else { return false }
+        return saveProjectDetails(id, notes: project.notes ?? "", links: project.links ?? [], tags: tags, configurations: configurations)
+    }
+
+    func tags(in group: ProjectGroup) -> [String] {
+        var seen = Set<String>()
+        return group.cards.compactMap { project(for: $0) }.flatMap(\.tags)
+            .filter { seen.insert($0.lowercased()).inserted }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    func filteredGroup(_ group: ProjectGroup, tag: String) -> ProjectGroup {
+        guard !tag.isEmpty else { return group }
+        var filtered = group
+        filtered.cards = group.cards.filter { card in
+            project(for: card)?.tags.contains { $0.localizedCaseInsensitiveCompare(tag) == .orderedSame } ?? false
+        }
+        let ids = Set(filtered.cards.map(\.id))
+        filtered.connections = group.connections.filter { ids.contains($0.fromCardID) && ids.contains($0.toCardID) }
+        filtered.regions = group.regions.compactMap { original in
+            var region = original; region.cardIDs.formIntersection(ids)
+            return region.cardIDs.isEmpty ? nil : region
+        }
+        return filtered
+    }
+
+    private var usedProjects: [ProjectSearchResult] {
+        var seen = Set<UUID>()
+        let results = searchProjects("")
+        let preferred = results.filter { $0.groupID == selectedGroupID } + results.filter { $0.groupID != selectedGroupID }
+        return preferred.filter { $0.project.lastOpenedAt != nil && seen.insert($0.project.id).inserted }
+    }
+
+    var recentProjects: [ProjectSearchResult] {
+        usedProjects.sorted {
+            let a = $0.project.lastOpenedAt ?? .distantPast, b = $1.project.lastOpenedAt ?? .distantPast
+            return a == b ? $0.id < $1.id : a > b
+        }
+    }
+
+    var frequentProjects: [ProjectSearchResult] {
+        recentProjects.sorted {
+            if $0.project.openCount != $1.project.openCount { return $0.project.openCount > $1.project.openCount }
+            let a = $0.project.lastOpenedAt ?? .distantPast, b = $1.project.lastOpenedAt ?? .distantPast
+            return a == b ? $0.id < $1.id : a > b
+        }
+    }
+
+    func recordProjectOpened(_ id: UUID, at date: Date = Date()) {
+        guard date.timeIntervalSince1970.isFinite, let index = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[index].lastOpenedAt = date
+        if projects[index].openCount < Int.max { projects[index].openCount += 1 }
+        persist(rotatingBackup: false)
+    }
+
+    func runProject(_ project: Project, configuration: LaunchConfiguration) {
+        Task {
+            do {
+                try await ProjectLauncher.run(project, configuration: configuration)
+                recordProjectOpened(project.id)
+                if desktopDisplayMode == .foregroundOverlay && isDesktopDisplayOn { toggleDesktopDisplay() }
+            } catch { alertMessage = error.localizedDescription }
+        }
     }
 
     func addRegion(name: String, color: CardColor, cardIDs: Set<UUID>, in groupID: UUID) {
@@ -380,6 +522,7 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 try await ProjectLauncher.open(project, editor: editor, newWindow: newWindow)
+                recordProjectOpened(project.id)
                 if desktopDisplayMode == .foregroundOverlay && isDesktopDisplayOn { toggleDesktopDisplay() }
             } catch { alertMessage = error.localizedDescription }
         }
@@ -459,7 +602,7 @@ final class AppModel: ObservableObject {
 
     func exportGroup(_ id: UUID, to url: URL) {
         guard let group = groups.first(where: { $0.id == id }) else { return }
-        let ids = Set(group.cards.map(\.projectID))
+        let ids = Set(group.cards.compactMap(\.projectID))
         let data = ProjectCanvasData(projects: projects.filter { ids.contains($0.id) }, groups: [group], selectedGroupID: group.id)
         do {
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -490,7 +633,7 @@ final class AppModel: ObservableObject {
                 var cardMap: [UUID: UUID] = [:]
                 group.cards = group.cards.map { original in
                     var card = original; card.id = UUID(); cardMap[original.id] = card.id
-                    card.projectID = projectMap[original.projectID]!
+                    card.projectID = original.projectID.flatMap { projectMap[$0] }
                     return card
                 }
                 group.connections = group.connections.map { original in
@@ -531,9 +674,18 @@ final class AppModel: ObservableObject {
         updateHistoryAvailability()
     }
 
-    private func restore(_ snapshot: ProjectCanvasData) {
+    private func restore(_ snapshot: ProjectCanvasData, preservingUsage: Bool = false) {
         restoring = true
-        projects = snapshot.projects
+        let usage = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, ($0.lastOpenedAt, $0.openCount)) })
+        projects = snapshot.projects.map { original in
+            var project = original
+            if preservingUsage, let current = usage[project.id],
+               project.lastOpenedAt != current.0 || project.openCount != current.1 {
+                project.lastOpenedAt = current.0
+                project.openCount = current.1
+            }
+            return project
+        }
         groups = snapshot.groups
         selectedGroupID = snapshot.selectedGroupID
         defaultEditor = snapshot.defaultEditor ?? .vscode

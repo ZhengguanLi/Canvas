@@ -13,13 +13,15 @@ struct DesktopSceneLayout {
     private(set) var cardFrames: [UUID: CGRect]
     private let visibleFrame: CGRect
     private let screenFrame: CGRect
-    private let canvasOrigin: CGPoint
+    private var canvasOrigin: CGPoint
+    private var coordinateOffset: CGPoint
     private let displayLeft: CGFloat
     private let displayTop: CGFloat
 
-    init(cards: [ProjectCard], screenFrame: CGRect, visibleFrame: CGRect, requestedScale: CGFloat = 1) {
+    init(cards: [ProjectCard], screenFrame: CGRect, visibleFrame: CGRect, requestedScale: CGFloat = 1, coordinateOffset: CGPoint = .zero, alignsToTop: Bool = false) {
         self.screenFrame = screenFrame
         self.visibleFrame = visibleFrame
+        self.coordinateOffset = coordinateOffset
         let minX = cards.map(\.x).min() ?? 0
         let minY = cards.map(\.y).min() ?? 0
         let width = max(1, (cards.map { $0.x + 210 }.max() ?? minX) - minX)
@@ -29,7 +31,7 @@ struct DesktopSceneLayout {
         self.scale = scale
         canvasOrigin = CGPoint(x: minX, y: minY)
         let left = visibleFrame.minX + (visibleFrame.width - width * scale) / 2
-        let top = visibleFrame.maxY - (visibleFrame.height - height * scale) / 2
+        let top = alignsToTop ? visibleFrame.maxY : visibleFrame.maxY - (visibleFrame.height - height * scale) / 2
         displayLeft = left
         displayTop = top
         cardFrames = Dictionary(uniqueKeysWithValues: cards.map { card in
@@ -40,11 +42,16 @@ struct DesktopSceneLayout {
     }
 
     /// Update positions without refitting or recentering a scene during a desktop session.
-    func updating(cards: [ProjectCard]) -> Self {
+    func updating(cards: [ProjectCard], coordinateOffset: CGPoint? = nil) -> Self {
         var updated = self
+        if let coordinateOffset {
+            updated.canvasOrigin.x += coordinateOffset.x - self.coordinateOffset.x
+            updated.canvasOrigin.y += coordinateOffset.y - self.coordinateOffset.y
+            updated.coordinateOffset = coordinateOffset
+        }
         updated.cardFrames = Dictionary(uniqueKeysWithValues: cards.map { card in
-            (card.id, CGRect(x: displayLeft + (card.x - canvasOrigin.x) * scale,
-                             y: displayTop - (card.y - canvasOrigin.y + 100) * scale,
+            (card.id, CGRect(x: displayLeft + (card.x - updated.canvasOrigin.x) * scale,
+                             y: displayTop - (card.y - updated.canvasOrigin.y + 100) * scale,
                              width: 210 * scale, height: 100 * scale))
         })
         return updated
@@ -55,7 +62,15 @@ struct DesktopSceneLayout {
               let frame = cardFrames[card.id] else { return CGPoint(x: card.x, y: card.y) }
         let dx = min(visibleFrame.maxX - frame.maxX, max(visibleFrame.minX - frame.minX, screenDelta.width))
         let dy = min(visibleFrame.maxY - frame.maxY, max(visibleFrame.minY - frame.minY, screenDelta.height))
-        return CGPoint(x: max(20, card.x + dx / scale), y: max(20, card.y - dy / scale))
+        return CGPoint(x: card.x + dx / scale, y: card.y - dy / scale)
+    }
+
+    func canvasPosition(atScreenPoint point: CGPoint) -> CGPoint {
+        guard scale > 0 else { return CGPoint(x: 20, y: 20) }
+        let left = min(visibleFrame.maxX - 210 * scale, max(visibleFrame.minX, point.x - 105 * scale))
+        let top = min(visibleFrame.maxY, max(visibleFrame.minY + 100 * scale, point.y + 50 * scale))
+        return CGPoint(x: max(20, canvasOrigin.x + (left - displayLeft) / scale),
+                       y: max(20, canvasOrigin.y + (displayTop - top) / scale))
     }
 
     func connections(in group: ProjectGroup) -> [Connection] {

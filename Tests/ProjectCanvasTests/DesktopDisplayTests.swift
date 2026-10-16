@@ -23,12 +23,21 @@ final class DesktopDisplayTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(100))
         let background = try XCTUnwrap(NSApp.windows.first { $0.contentView is DesktopBackgroundBlurView })
         let blur = try XCTUnwrap(background.contentView as? DesktopBackgroundBlurView)
-        let shelf = try XCTUnwrap(NSApp.windows.first { $0.isVisible && $0.contentView is NSHostingView<ClipboardShelfView> })
-        XCTAssertFalse(shelf.ignoresMouseEvents)
-        XCTAssertFalse(shelf.canBecomeKey)
+        let shelf = try XCTUnwrap(blur.subviews.first { $0 is NSHostingView<ClipboardShelfView> })
+        XCTAssertTrue(shelf.window === background)
+        XCTAssertFalse(background.canBecomeKey)
+        XCTAssertGreaterThan(shelf.frame.height, 120, "Empty clotheslines must reserve space for hanging content")
+        let shelfFrame = background.convertToScreen(shelf.frame)
+        XCTAssertFalse(blur.hitTest(CGPoint(x: shelf.frame.midX, y: shelf.frame.midY)) === blur,
+                       "Clothesline interactions must not dismiss the desktop")
         for cardPanel in NSApp.windows where cardPanel.isVisible && cardPanel.contentView is DesktopProjectCardView {
-            XCTAssertLessThan(cardPanel.frame.maxY, shelf.frame.minY)
+            XCTAssertLessThan(cardPanel.frame.maxY, shelfFrame.minY)
         }
+        let cardBounds = NSApp.windows.filter { $0.isVisible && $0.contentView is DesktopProjectCardView }
+            .reduce(CGRect.null) { $0.union($1.frame) }
+        // AppKit rounds panel frames to display pixels.
+        XCTAssertEqual(shelfFrame.minY - cardBounds.maxY, 24, accuracy: 1)
+        XCTAssertEqual(cardBounds.midX, screen.visibleFrame.midX, accuracy: 1)
         XCTAssertTrue(background.isVisible, "Enabling cards must also show the blur")
         XCTAssertEqual(blur.bounds.width, screen.frame.width, accuracy: 1)
         XCTAssertEqual(blur.bounds.height, screen.frame.height, accuracy: 1)
@@ -40,11 +49,26 @@ final class DesktopDisplayTests: XCTestCase {
         blur.update(appearance: DesktopAppearance(blur: 0, dimming: 0.4))
         XCTAssertTrue(blur.effect.isHidden)
         XCTAssertEqual(blur.connections.alphaValue, 1)
+        let defaults = UserDefaults.standard
+        let previousFullScreen = defaults.object(forKey: "clipboardShelfFullScreen")
+        defer {
+            if let previousFullScreen { defaults.set(previousFullScreen, forKey: "clipboardShelfFullScreen") }
+            else { defaults.removeObject(forKey: "clipboardShelfFullScreen") }
+        }
+        defaults.set(true, forKey: "clipboardShelfFullScreen")
+        notifyClipboardDisplayChange()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertFalse(NSApp.windows.contains { $0.isVisible && $0.contentView is DesktopProjectCardView },
+                       "Full-screen browsing must cover the cards")
+        defaults.set(false, forKey: "clipboardShelfFullScreen")
+        notifyClipboardDisplayChange()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(NSApp.windows.contains { $0.isVisible && $0.contentView is DesktopProjectCardView })
         let click = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseUp, location: CGPoint(x: 12, y: 12), modifierFlags: [], timestamp: 0, windowNumber: background.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 0))
         XCTAssertTrue(blur.hitTest(CGPoint(x: 12, y: 12)) === blur, "Background decorations must not intercept dismissal")
         blur.mouseUp(with: click)
         XCTAssertFalse(model.isDesktopDisplayOn)
         XCTAssertFalse(background.isVisible)
-        XCTAssertFalse(shelf.isVisible)
+        XCTAssertTrue(shelf.isHidden)
     }
 }

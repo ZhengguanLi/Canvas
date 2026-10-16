@@ -20,6 +20,22 @@ struct Project: Identifiable, Codable, Equatable {
     var openInNewWindow: Bool?
     var notes: String?
     var links: [ProjectLink]?
+    private var storedTags: [String]?
+    var tags: [String] {
+        get { storedTags ?? [] }
+        set { storedTags = newValue }
+    }
+    private var storedLaunchConfigurations: [LaunchConfiguration]?
+    var launchConfigurations: [LaunchConfiguration] {
+        get { storedLaunchConfigurations ?? [] }
+        set { storedLaunchConfigurations = newValue }
+    }
+    var lastOpenedAt: Date?
+    private var storedOpenCount: Int?
+    var openCount: Int {
+        get { storedOpenCount ?? 0 }
+        set { storedOpenCount = newValue }
+    }
     var folderPath: String
 
     var folderURL: URL { URL(fileURLWithPath: folderPath, isDirectory: true) }
@@ -31,9 +47,28 @@ struct Project: Identifiable, Codable, Equatable {
     }
 }
 
+struct LaunchConfiguration: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var name: String
+    var command: String
+    /// Empty or relative paths resolve against the project folder.
+    var workingDirectory = ""
+    var environment: [String: String] = [:]
+
+    var isValid: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !command.contains("\0") && !workingDirectory.contains("\0") &&
+        environment.allSatisfy { key, value in
+            key.range(of: #"\A[A-Za-z_][A-Za-z0-9_]*\z"#, options: .regularExpression) != nil && !value.contains("\0")
+        }
+    }
+}
+
 struct ProjectCard: Identifiable, Codable, Equatable {
     var id: UUID
-    var projectID: UUID
+    var projectID: UUID?
+    var clipboard: CanvasClipboardContent?
     var x: Double
     var y: Double
     var customName: String?
@@ -50,6 +85,14 @@ struct ProjectCard: Identifiable, Codable, Equatable {
         self.y = y
         self.customName = customName
     }
+
+    init(id: UUID = UUID(), clipboard: CanvasClipboardContent, x: Double, y: Double) {
+        self.id = id
+        self.clipboard = clipboard
+        self.x = x
+        self.y = y
+    }
+
 }
 
 struct ProjectConnection: Identifiable, Codable, Equatable {
@@ -76,6 +119,8 @@ struct ProjectGroup: Identifiable, Codable, Equatable {
     var cards: [ProjectCard]
     var connections: [ProjectConnection]
     var viewport: CanvasViewport?
+    /// Tracks canvas rebasing so desktop transforms also survive undo and redo.
+    var coordinateOffset: CGPoint?
     private var storedRegions: [ProjectRegion]?
     var regions: [ProjectRegion] {
         get { storedRegions ?? [] }

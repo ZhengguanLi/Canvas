@@ -3,7 +3,7 @@ import Combine
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Session-only history. Clipboard contents are never written into the project file.
+/// Session-only history; only content explicitly placed on a canvas is persisted.
 @MainActor
 final class ClipboardHistory: ObservableObject {
     struct TextItem: Identifiable {
@@ -24,7 +24,11 @@ final class ClipboardHistory: ObservableObject {
 
     nonisolated static let maximumTextBytes = 256 * 1024
     nonisolated static let maximumImageBytes = 8 * 1024 * 1024
-    private let limit: Int
+    static let textLimitKey = "clipboardTextLimit"
+    static let imageLimitKey = "clipboardImageLimit"
+    private let preferences: UserDefaults
+    @Published private(set) var textLimit: Int
+    @Published private(set) var imageLimit: Int
     @Published private(set) var texts: [TextItem] = []
     @Published private(set) var images: [ImageItem] = []
     @Published var isPaused = false {
@@ -38,7 +42,29 @@ final class ClipboardHistory: ObservableObject {
     private var lastCount = 0
     private var generation = 0
 
-    init(limit: Int = 50) { self.limit = max(1, limit) }
+    init(limit: Int? = nil, preferences: UserDefaults = .standard) {
+        self.preferences = preferences
+        textLimit = limit.map { max(1, $0) } ?? Self.normalizedLimit((preferences.object(forKey: Self.textLimitKey) as? Int) ?? 50)
+        imageLimit = limit.map { max(1, $0) } ?? Self.normalizedLimit((preferences.object(forKey: Self.imageLimitKey) as? Int) ?? 50)
+    }
+
+    static let limitPresets = [25, 50, 100, 0]
+
+    /// Zero means unlimited count. Legacy custom values round up without dropping extra items.
+    private static func normalizedLimit(_ value: Int) -> Int {
+        if value == 0 { return 0 }
+        guard value > 0 else { return 50 }
+        return [25, 50, 100].first(where: { $0 >= value }) ?? 0
+    }
+
+    func setLimits(text: Int? = nil, images: Int? = nil) {
+        if let text { textLimit = Self.normalizedLimit(text) }
+        if let images { imageLimit = Self.normalizedLimit(images) }
+        preferences.set(textLimit, forKey: Self.textLimitKey)
+        preferences.set(imageLimit, forKey: Self.imageLimitKey)
+        if textLimit > 0 && texts.count > textLimit { texts.removeSubrange(textLimit...) }
+        if imageLimit > 0 && self.images.count > imageLimit { self.images.removeSubrange(imageLimit...) }
+    }
     deinit { timer?.invalidate() }
 
     func start(pasteboard: NSPasteboard = .general) {
@@ -91,7 +117,7 @@ final class ClipboardHistory: ObservableObject {
         let existing = texts.first { $0.text == text }
         texts.removeAll { $0.text == text }
         texts.insert(existing ?? TextItem(text: text), at: 0)
-        while texts.count > limit || texts.reduce(0, { $0 + $1.text.utf8.count }) > 2 * 1024 * 1024 { texts.removeLast() }
+        while (textLimit > 0 && texts.count > textLimit) || texts.reduce(0, { $0 + $1.text.utf8.count }) > 2 * 1024 * 1024 { texts.removeLast() }
     }
 
     nonisolated static func prepareImage(_ data: Data) -> PreparedImage? {
@@ -118,7 +144,7 @@ final class ClipboardHistory: ObservableObject {
         let existing = images.first { $0.data == image.data && $0.type == type }
         images.removeAll { $0.data == image.data && $0.type == type }
         images.insert(existing ?? ImageItem(data: image.data, type: type, thumbnail: thumbnail), at: 0)
-        while images.count > limit || images.reduce(0, { $0 + $1.data.count }) > 64 * 1024 * 1024 { images.removeLast() }
+        while (imageLimit > 0 && images.count > imageLimit) || images.reduce(0, { $0 + $1.data.count }) > 64 * 1024 * 1024 { images.removeLast() }
     }
 
     @discardableResult func copyText(_ id: UUID) -> Bool {

@@ -3,6 +3,59 @@ import Foundation
 
 /// Launches a directory without interpolating its path into shell code.
 enum ProjectLauncher {
+    /// Quotes data values; the user's command is interpreted only by the child shell.
+    private static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    static func launchScript(project: Project, configuration: LaunchConfiguration, cleanupDirectory: URL? = nil) throws -> String {
+        guard configuration.isValid else { throw LaunchError.invalidConfiguration }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: project.folderPath, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw LaunchError.missingFolder
+        }
+        let path = configuration.workingDirectory
+        let directory = path.isEmpty ? project.folderURL :
+            (path.hasPrefix("/") ? URL(fileURLWithPath: path, isDirectory: true) : project.folderURL.appendingPathComponent(path, isDirectory: true))
+        guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw LaunchError.missingWorkingDirectory
+        }
+        let environment = configuration.environment.sorted { $0.key < $1.key }
+            .map { shellQuote($0.key + "=" + $0.value) }.joined(separator: " ")
+        // Load the user's tool paths first, then apply the explicit project settings.
+        let command = "cd -- " + shellQuote(directory.standardizedFileURL.path) + " || exit 1\n" +
+            "exec /usr/bin/env " + environment + " /bin/zsh -c " + shellQuote(configuration.command)
+        let cleanup = cleanupDirectory.map { "\n/bin/rmdir -- " + shellQuote($0.path) } ?? ""
+        return """
+        #!/bin/zsh
+        /bin/rm -f -- "$0"\(cleanup)
+        /bin/zsh -l -c \(shellQuote(command))
+
+        """
+    }
+
+    @MainActor
+    static func run(_ project: Project, configuration: LaunchConfiguration) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ProjectCanvas-" + UUID().uuidString, isDirectory: true)
+        let script = try launchScript(project: project, configuration: configuration, cleanupDirectory: directory)
+        guard let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else {
+            throw LaunchError.appMissing("Terminal")
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let file = directory.appendingPathComponent("Launch.command")
+        // The private directory prevents other users reading environment values while Terminal opens.
+        do {
+            try script.write(to: file, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+            let options = NSWorkspace.OpenConfiguration()
+            options.activates = true
+            _ = try await NSWorkspace.shared.open([file], withApplicationAt: terminal, configuration: options)
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        }
+    }
+
     static func arguments(editor: EditorChoice, newWindow: Bool, path: String) -> [String] {
         switch editor {
         case .vscode, .cursor: return [newWindow ? "--new-window" : "--reuse-window", path]
@@ -51,9 +104,11 @@ enum ProjectLauncher {
     }
 
     enum LaunchError: LocalizedError {
-        case missingFolder, failed, appMissing(String), command(String)
+        case missingFolder, failed, appMissing(String), command(String), invalidConfiguration, missingWorkingDirectory
         var errorDescription: String? {
             switch self {
+            case .invalidConfiguration: L10n.tr("启动配置需要名称、命令和有效的环境变量名称。")
+            case .missingWorkingDirectory: L10n.tr("启动工作目录不存在，请检查启动配置。")
             case .missingFolder: L10n.tr("文件夹不存在，请右键卡片选择“重新定位文件夹”。")
             case .failed: L10n.tr("无法打开文件夹。")
             case .appMissing(let app): L10n.format("找不到 %@，请安装应用或更改打开方式。", app)

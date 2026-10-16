@@ -14,7 +14,7 @@ struct GlobalSearchView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L10n.tr("搜索所有项目组")).font(.headline)
-            TextField(L10n.tr("项目名称或路径"), text: $query).textFieldStyle(.roundedBorder).focused($searchFocused)
+            TextField(L10n.tr("项目名称、路径或标签"), text: $query).textFieldStyle(.roundedBorder).focused($searchFocused)
                 .onKeyPress(.downArrow) { moveSelection(1); return .handled }
                 .onKeyPress(.upArrow) { moveSelection(-1); return .handled }
                 .onSubmit { open() }
@@ -55,45 +55,82 @@ struct ProjectDetailsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var notes: String
     @State private var links: [ProjectLink]
+    @State private var tags: String
+    @State private var configurations: [LaunchConfiguration]
+    @State private var editingConfiguration: LaunchConfiguration?
     @State private var error: String?
 
     init(model: AppModel, project: Project) {
         self.model = model; self.project = project
         _notes = State(initialValue: project.notes ?? "")
         _links = State(initialValue: project.links ?? [])
+        _tags = State(initialValue: project.tags.joined(separator: ", "))
+        _configurations = State(initialValue: project.launchConfigurations)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(project.folderName).font(.title2)
-            Text(L10n.tr("项目备注与链接（所有项目组共享）")).foregroundStyle(.secondary)
-            TextEditor(text: $notes).font(.body).border(.quaternary).frame(minHeight: 160).accessibilityLabel(L10n.tr("项目备注"))
-            HStack {
-                Text(L10n.tr("链接")).font(.headline)
-                Spacer()
-                Button(L10n.tr("添加链接")) { links.append(ProjectLink(name: "", address: "https://")) }
-            }
-            ScrollView {
-                VStack {
-                    ForEach($links) { $link in
-                        HStack {
-                            TextField(L10n.tr("名称"), text: $link.name).frame(width: 130)
-                            TextField("https://…", text: $link.address)
-                            Button { if let url = link.validatedURL { NSWorkspace.shared.open(url) } } label: { Image(systemName: "arrow.up.right.square") }.disabled(link.validatedURL == nil).help(L10n.tr("打开链接"))
-                            Button { links.removeAll { $0.id == link.id } } label: { Image(systemName: "minus.circle") }.help(L10n.tr("移除链接"))
+            Text(L10n.tr("项目详情（所有项目组共享）")).foregroundStyle(.secondary)
+            TabView {
+                VStack(alignment: .leading, spacing: 12) {
+                    TextField(L10n.tr("标签（用逗号分隔）"), text: $tags).textFieldStyle(.roundedBorder)
+                    TextEditor(text: $notes).font(.body).border(.quaternary).frame(minHeight: 160).accessibilityLabel(L10n.tr("项目备注"))
+                    HStack {
+                        Text(L10n.tr("链接")).font(.headline)
+                        Spacer()
+                        Button(L10n.tr("添加链接")) { links.append(ProjectLink(name: "", address: "https://")) }
+                    }
+                    ScrollView {
+                        VStack {
+                            ForEach($links) { $link in
+                                HStack {
+                                    TextField(L10n.tr("名称"), text: $link.name).frame(width: 130)
+                                    TextField("https://…", text: $link.address)
+                                    Button { if let url = link.validatedURL { NSWorkspace.shared.open(url) } } label: { Image(systemName: "arrow.up.right.square") }.disabled(link.validatedURL == nil).help(L10n.tr("打开链接"))
+                                    Button { links.removeAll { $0.id == link.id } } label: { Image(systemName: "minus.circle") }.help(L10n.tr("移除链接"))
+                                }
+                            }
+                        }
+                    }.frame(height: 150)
+                }.padding(12).tabItem { Text(L10n.tr("备注与标签")) }
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text(L10n.tr("在 Terminal 中运行，工作目录默认为项目文件夹。")).font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button(L10n.tr("添加启动配置")) { editingConfiguration = LaunchConfiguration(name: "", command: "") }
+                    }
+                    List {
+                        ForEach(configurations) { configuration in
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(configuration.name).fontWeight(.medium)
+                                    Text(configuration.command).font(.caption.monospaced()).lineLimit(2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button(L10n.tr("编辑")) { editingConfiguration = configuration }
+                                Button(L10n.tr("删除"), role: .destructive) { configurations.removeAll { $0.id == configuration.id } }
+                            }
                         }
                     }
-                }
-            }.frame(height: 150)
+                }.padding(12).tabItem { Text(L10n.tr("启动配置")) }
+            }
             if let error { Text(error).foregroundStyle(.red).font(.caption) }
             HStack {
                 Spacer()
                 Button(L10n.tr("取消"), role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(L10n.tr("保存")) {
                     guard links.allSatisfy({ $0.validatedURL != nil }) else { error = L10n.tr("链接需要名称和有效的 HTTP 或 HTTPS 地址。"); return }
-                    if model.saveProjectDetails(project.id, notes: notes, links: links) { dismiss() }
+                    let parsedTags = tags.components(separatedBy: CharacterSet(charactersIn: ",，\n"))
+                    if model.saveProjectDetails(project.id, notes: notes, links: links, tags: parsedTags, configurations: configurations) { dismiss() }
                 }.keyboardShortcut(.defaultAction)
             }
-        }.padding(20).frame(width: 650, height: 490)
+        }.padding(20).frame(width: 700, height: 570)
+            .sheet(item: $editingConfiguration) { configuration in
+                LaunchConfigurationEditor(configuration: configuration) { saved in
+                    if let index = configurations.firstIndex(where: { $0.id == saved.id }) { configurations[index] = saved }
+                    else { configurations.append(saved) }
+                }
+            }
     }
 }
 

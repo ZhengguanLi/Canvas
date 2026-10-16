@@ -4,6 +4,25 @@ import XCTest
 @testable import ProjectCanvas
 
 final class ViewSmokeTests: XCTestCase {
+    @MainActor func testCanvasBackgroundRendersSavedTint() throws {
+        _ = NSApplication.shared
+        let name = "CanvasBackgroundTests.\(UUID().uuidString)"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { preferences.removePersistentDomain(forName: name) }
+        BackgroundTint(color: try XCTUnwrap(BackgroundTintColor(hex: "#0000FF")), opacity: 0.8)
+            .saveShared(to: preferences)
+        let host = NSHostingView(rootView: CanvasBackgroundView().defaultAppStorage(preferences).environment(\.colorScheme, .light))
+        host.appearance = NSAppearance(named: .aqua)
+        host.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        host.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let pixel = try XCTUnwrap(bitmap.colorAt(x: 50, y: 50)?.usingColorSpace(.sRGB))
+        XCTAssertEqual(pixel.blueComponent, 1, accuracy: 0.03)
+        // Color-managed AppKit captures can shift components; the saved tint must still dominate.
+        XCTAssertGreaterThan(pixel.blueComponent - max(pixel.redComponent, pixel.greenComponent), 0.5)
+    }
+
     @MainActor func testCanvasRendersAtSmallViewportAndPreservesNativeScrollOffset() throws {
         _ = NSApplication.shared
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -33,6 +52,29 @@ final class ViewSmokeTests: XCTestCase {
         XCTAssertEqual(scroll.contentView.bounds.origin.y, 50, accuracy: 1)
         XCTAssertNotNil(host.bitmapImageRepForCachingDisplay(in: host.bounds))
     }
+    @MainActor func testCanvasSelectionSurfaceCoversLargeViewportAtEveryZoom() throws {
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let model = AppModel(storageURL: directory.appendingPathComponent("canvas.json"))
+        model.addProject(folderURL: directory)
+        let group = try XCTUnwrap(model.selectedGroup)
+        let viewport = CGSize(width: 3000, height: 1600)
+        for zoom in [0.25, 1.0, 1.5] {
+            let board = CanvasBoard(model: model, group: group, zoom: zoom, isEditing: true, snapToGrid: true,
+                selectedCardIDs: .constant([]), selectedConnectionID: .constant(nil),
+                isConnecting: .constant(false), firstConnectionCardID: .constant(nil), highlightDirection: 0,
+                onOpenSettings: { _ in }, onRelocate: { _ in },
+                minimumSize: CGSize(width: viewport.width / zoom, height: viewport.height / zoom))
+            let host = NSHostingView(rootView: board)
+            host.frame = CGRect(origin: .zero, size: viewport)
+            host.layoutSubtreeIfNeeded()
+            XCTAssertGreaterThanOrEqual(host.fittingSize.width, viewport.width - 1)
+            XCTAssertGreaterThanOrEqual(host.fittingSize.height, viewport.height - 1)
+        }
+    }
+
     @MainActor func testImmediateTeardownCommitsPendingViewport() async throws {
         _ = NSApplication.shared
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

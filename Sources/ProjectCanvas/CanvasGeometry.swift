@@ -4,6 +4,12 @@ import Foundation
 enum CanvasGeometry {
     static let cardSize = CGSize(width: 210, height: 100)
 
+    static func positionForDrop(at point: CGPoint, zoom: Double, scrollOffset: CGPoint = .zero) -> CGPoint {
+        guard zoom.isFinite, zoom > 0, point.x.isFinite, point.y.isFinite, scrollOffset.x.isFinite, scrollOffset.y.isFinite else { return CGPoint(x: 20, y: 20) }
+        return CGPoint(x: max(20, (point.x + scrollOffset.x) / zoom - cardSize.width / 2),
+                       y: max(20, (point.y + scrollOffset.y) / zoom - cardSize.height / 2))
+    }
+
     static func regionPresentation(around cards: CGRect) -> (frame: CGRect, header: CGPoint) {
         // Near the canvas top, put the handle below its members instead of moving saved cards.
         let headerBelow = cards.minY < 42
@@ -14,9 +20,9 @@ enum CanvasGeometry {
         return (frame, CGPoint(x: frame.midX, y: headerBelow ? bottom - 18 : top + 18))
     }
 
-    static func extent(cards: [ProjectCard]) -> CGSize {
-        CGSize(width: max(1200, (cards.map(\.x).max() ?? 0) + 330),
-               height: max(800, (cards.map(\.y).max() ?? 0) + 220))
+    static func extent(cards: [ProjectCard], minimumSize: CGSize = .zero) -> CGSize {
+        CGSize(width: max(1200, minimumSize.width, (cards.map(\.x).max() ?? 0) + 330),
+               height: max(800, minimumSize.height, (cards.map(\.y).max() ?? 0) + 220))
     }
 
     static func clampedOffset(_ proposed: CGSize, cards: [ProjectCard]) -> CGSize {
