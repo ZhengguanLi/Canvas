@@ -46,7 +46,7 @@ final class LanguageController: ObservableObject {
     init(preferences: UserDefaults = .standard, preferredLanguages: @escaping () -> [String] = { Locale.preferredLanguages }) {
         self.preferences = preferences
         self.preferredLanguages = preferredLanguages
-        selection = AppLanguage(rawValue: preferences.string(forKey: Self.preferenceKey) ?? "") ?? .system
+        selection = AppLanguage(rawValue: preferences.string(forKey: Self.preferenceKey) ?? "") ?? .english
     }
 
     var resolvedLanguage: AppLanguage {

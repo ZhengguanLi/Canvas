@@ -6,8 +6,8 @@ ProjectCanvas is a standalone macOS 14+ app for organizing local project folders
 
 - Create, rename, switch, export, and import project groups. A folder can appear in several groups with its own name, color, and position in each.
 - Add folders with the picker or drag them from Finder onto the canvas.
-- Click a card to open it. Right-click for **打开方式**, **在 Finder 中显示**, **复制路径**, **重新定位文件夹**, and **卡片背景**.
-- Set a default application in **设置**: VS Code, Cursor, IntelliJ IDEA, Finder, or Terminal. Each project can override it.
+- Click a card to open it. Right-click for **Open With**, **Show in Finder**, **Copy Path**, **Relocate Folder**, and **Card Background**.
+- Set a default application in **Settings**: VS Code, Cursor, IntelliJ IDEA, Finder, or Terminal. Each project can override it.
 - VS Code and Cursor support new/reused windows. IntelliJ and Terminal use their own window preferences.
 - Cards display Git branch, changed-file count, and linked-worktree status. Status refreshes in the background on activation, approximately every minute, or with the refresh button. Git must be available through `/usr/bin/git`.
 
@@ -16,19 +16,19 @@ ProjectCanvas is a standalone macOS 14+ app for organizing local project folders
 - Press **⌘K** to search project names and paths across groups; open a result or locate its card on the canvas.
 - Create named, colored regions from selected cards. Drag a region header in edit mode to move its cards together; removing a region keeps its cards.
 - Use a card's details action to edit project notes and named web links. These details are shared across groups.
-- Enter **编辑** to select or move cards without opening them. Marquee selection works even when there are no visible connections. Shift-click or Shift/Control-marquee adds to the selection.
+- Enter **Edit** to select or move cards without opening them. Marquee selection works even when there are no visible connections. Shift-click or Shift/Control-marquee adds to the selection.
 - Selected cards and their connections preview movement together; grid snapping preserves relative spacing.
-- Choose **背景颜色** for a selection, or use a card's context menu. Six choices are available, including the default background. Colors also appear on desktop cards.
-- Use **布局** to preview a grid or directed relationship layout. A preview does not change saved card positions. **Apply** commits one undoable operation; canceling or closing keeps your manual layout. If the canvas changes while the preview is open, generate a fresh preview. Grid alignment and drag snapping remain available.
-- Create directed connections by selecting the source and destination. Reverse connections are supported and drawn on separate curves. Select a connection and choose **连线属性** to assign a type and label.
-- **关系** controls visibility and highlights the selected projects' transitive upstream/downstream relationships.
-- Canvas bounds grow with content. **显示全部** fits the current content; **回到内容** returns to its origin. Zoom and scroll position are remembered separately per group.
+- Choose **Background Color** for a selection, or use a card's context menu. Six choices are available, including the default background. Colors also appear on desktop cards.
+- Use **Layout** to preview a grid or directed relationship layout. A preview does not change saved card positions. **Apply** commits one undoable operation; canceling or closing keeps your manual layout. If the canvas changes while the preview is open, generate a fresh preview. Grid alignment and drag snapping remain available.
+- Create directed connections by selecting the source and destination. Reverse connections are supported and drawn on separate curves. Select a connection and choose **Connection Properties** to assign a type and label.
+- **Relationships** controls visibility and highlights the selected projects' transitive upstream/downstream relationships.
+- Canvas bounds grow with content. **Show All** fits the current content; **Return to Content** returns to its origin. Zoom and scroll position are remembered separately per group.
 - Undo/redo covers card colors, movement, layout, connections, project options, and group changes. Bulk folder additions and bulk card removal each form one undo operation.
 
 ## Desktop cards
 
 - Toggle desktop cards from the toolbar or use **⌘⇧Space** globally while the app is running.
-- Desktop cards include directed, labeled connections and a blurred background. Connection visibility follows **关系 → 显示连线**.
+- Desktop cards include directed, labeled connections and a blurred background. Connection visibility follows **Relationships → Show Connections**.
 - **Fn-F11** retains macOS native Show Desktop behavior; the app shortcut is **⌘⇧Space**.
 - Settings offer desktop-background and foreground-overlay modes, plus a fixed monitor or the current monitor. A disconnected fixed monitor falls back to the current one.
 - Foreground overlay closes after a project opens successfully. A close button also dismisses it.
@@ -56,8 +56,8 @@ Data is saved at `~/Library/Application Support/ProjectCanvas/canvas.json`.
 - Invalid or unreadable files are preserved, and saving pauses until recovery. The recovery banner offers backup restoration or JSON import.
 - The five most recent changed, valid pre-edit snapshots are retained as `canvas.json.backup1` through `canvas.json.backup5`. Scrolling, zooming, and group selection do not rotate these backups.
 - Restoring a backup or importing during recovery preserves the previous file as `canvas.json.preserved-<UUID>`.
-- **导入、导出与恢复** exports the selected group or imports groups into the current collection. Import generates fresh group/card/connection IDs and reuses projects with the same path.
-- Optional path-prefix mapping supports moving exports between machines. Missing folders can also be repaired individually through **重新定位文件夹**.
+- **Import, Export and Recovery** exports the selected group or imports groups into the current collection. Import generates fresh group/card/connection IDs and reuses projects with the same path.
+- Optional path-prefix mapping supports moving exports between machines. Missing folders can also be repaired individually through **Relocate Folder**.
 - Exports contain local folder paths. Repository contents are not copied.
 
 The clipboard shelf’s expand button fills the desktop overlay with separate image and text grids, each with its own scrolling. Use the restore button to return to the top shelf; Escape closes the overlay.
@@ -76,7 +76,7 @@ The clipboard shelf’s expand button fills the desktop overlay with separate im
 
 ## Language
 
-Choose **System**, **简体中文**, or **English** in Settings. Application copy changes immediately and the preference persists. Project names, notes, custom link titles and connection labels remain as entered. Native macOS dialogs follow the operating system's language.
+English is the default for new installations. Choose **System**, **Simplified Chinese**, or **English** in Settings. Application copy changes immediately and the preference persists. Project names, notes, custom link titles and connection labels remain as entered. Native macOS dialogs follow the operating system's language.
 
 ## Build and verify
 

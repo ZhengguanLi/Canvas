@@ -6,13 +6,13 @@ final class LocalizationTests: XCTestCase {
         let name = "LocalizationTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         defer { defaults.removePersistentDomain(forName: name) }
-        let controller = LanguageController(preferences: defaults, preferredLanguages: { ["en-US"] })
-        XCTAssertEqual(controller.selection, .system)
+        let controller = LanguageController(preferences: defaults, preferredLanguages: { ["zh-Hans-CN"] })
+        XCTAssertEqual(controller.selection, .english)
         XCTAssertEqual(controller.resolvedLanguage, .english)
         controller.selection = .simplifiedChinese
         XCTAssertEqual(LanguageController(preferences: defaults).selection, .simplifiedChinese)
         defaults.set("invalid", forKey: LanguageController.preferenceKey)
-        XCTAssertEqual(LanguageController(preferences: defaults).selection, .system)
+        XCTAssertEqual(LanguageController(preferences: defaults).selection, .english)
     }
 
     func testSystemLanguageResolutionAndFallback() {
@@ -28,9 +28,9 @@ final class LocalizationTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: name) }
         let controller = LanguageController(preferences: defaults)
         let notification = expectation(forNotification: .projectCanvasLanguageChanged, object: nil)
-        controller.selection = .english
+        controller.selection = .simplifiedChinese
         wait(for: [notification], timeout: 1)
-        XCTAssertEqual(controller.locale.identifier, "en")
+        XCTAssertEqual(controller.locale.identifier, "zh-Hans")
     }
 
     func testDictionaryAndUserContentFallback() {
