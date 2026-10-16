@@ -273,7 +273,8 @@ final class DesktopDisplayController {
         model.clipboardHistory.start()
         panel.level = .floating
         panel.ignoresMouseEvents = false
-        panel.setFrame(DesktopOverlayLayout(visibleFrame: screen.visibleFrame, expanded: shelfExpanded).shelf, display: true)
+        panel.setFrame(DesktopOverlayLayout(visibleFrame: screen.visibleFrame, expanded: shelfExpanded,
+            fullScreen: UserDefaults.standard.bool(forKey: "clipboardShelfFullScreen")).shelf, display: true)
         panel.orderFrontRegardless()
         clipboardPanel = panel
     }

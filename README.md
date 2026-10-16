@@ -60,6 +60,8 @@ Data is saved at `~/Library/Application Support/ProjectCanvas/canvas.json`.
 - Optional path-prefix mapping supports moving exports between machines. Missing folders can also be repaired individually through **重新定位文件夹**.
 - Exports contain local folder paths. Repository contents are not copied.
 
+The clipboard shelf’s expand button fills the desktop overlay with separate image and text grids, each with its own scrolling. Use the restore button to return to the top shelf; Escape closes the overlay.
+
 ## Shortcuts
 
 | Action | Shortcut |

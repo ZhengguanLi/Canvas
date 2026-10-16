@@ -5,13 +5,14 @@ struct ClipboardShelfView: View {
     @ObservedObject var history: ClipboardHistory
     var onClose: (() -> Void)? = nil
     @AppStorage("clipboardShelfExpanded") private var expanded = true
+    @AppStorage("clipboardShelfFullScreen") private var fullScreen = false
     @State private var copiedID: UUID?
     @State private var copyFailed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Button { expanded.toggle() } label: {
+                Button { if fullScreen { fullScreen = false }; expanded.toggle() } label: {
                     Label(L10n.tr("剪贴板"), systemImage: expanded ? "chevron.down" : "chevron.right")
                 }.buttonStyle(.plain).font(.headline)
                 if !expanded { Text("\(history.images.count) / \(history.texts.count)").monospacedDigit().font(.caption) }
@@ -21,12 +22,20 @@ struct ClipboardShelfView: View {
                 Button { history.isPaused.toggle() } label: {
                     Label(L10n.tr(history.isPaused ? "继续记录" : "暂停记录"), systemImage: history.isPaused ? "play" : "pause")
                 }.controlSize(.small)
+                Button {
+                    fullScreen.toggle()
+                    if fullScreen { expanded = true }
+                } label: {
+                    Image(systemName: fullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                }.buttonStyle(.plain).help(L10n.tr(fullScreen ? "恢复顶部尺寸" : "展开剪贴板"))
                 if let onClose {
                     Button(action: onClose) { Image(systemName: "xmark.circle.fill") }
                         .buttonStyle(.plain).help(L10n.tr("关闭桌面覆盖"))
                 }
             }
-            if expanded {
+            if fullScreen {
+                fullScreenContents
+            } else if expanded {
                 HStack(spacing: 10) {
                     sectionTitle("图片", count: history.images.count, clear: history.clearImages)
                     ScrollViewReader { proxy in
@@ -77,9 +86,55 @@ struct ClipboardShelfView: View {
         .onChange(of: expanded) { _, _ in
             NotificationCenter.default.post(name: Notification.Name("ProjectCanvasDesktopPreferencesChanged"), object: nil)
         }
+        .onChange(of: fullScreen) { _, _ in
+            NotificationCenter.default.post(name: Notification.Name("ProjectCanvasDesktopPreferencesChanged"), object: nil)
+        }
         .task(id: copiedID) {
             guard copiedID != nil else { return }
             do { try await Task.sleep(for: .seconds(1.5)); copiedID = nil } catch { }
+        }
+    }
+
+    private var fullScreenContents: some View {
+        HStack(alignment: .top, spacing: 20) {
+            VStack(alignment: .leading, spacing: 12) {
+                sectionTitle("图片", count: history.images.count, clear: history.clearImages)
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 160))], spacing: 12) {
+                        ForEach(history.images) { item in
+                            Button { copied(item.id, success: history.copyImage(item.id)) } label: {
+                                Image(nsImage: item.thumbnail).resizable().scaledToFit()
+                                    .frame(maxWidth: .infinity).frame(height: 140).padding(8)
+                                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                                    .overlay(alignment: .bottomTrailing) { copiedBadge(item.id) }
+                            }.buttonStyle(.plain)
+                                .help(L10n.tr("点击重新复制，右键删除"))
+                                .accessibilityLabel(L10n.tr("复制图片"))
+                                .contextMenu { Button(L10n.tr("删除"), role: .destructive) { history.removeImage(item.id) } }
+                        }
+                    }
+                    if history.images.isEmpty { emptyHint("尚无复制的图片") }
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            Divider()
+            VStack(alignment: .leading, spacing: 12) {
+                sectionTitle("文字", count: history.texts.count, clear: history.clearTexts)
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 200))], spacing: 12) {
+                        ForEach(history.texts) { item in
+                            Button { copied(item.id, success: history.copyText(item.id)) } label: {
+                                Text(String(item.text.prefix(2000))).font(.system(size: 13))
+                                    .lineLimit(8).multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .topLeading).frame(height: 140, alignment: .topLeading).padding(8)
+                                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                                    .overlay(alignment: .bottomTrailing) { copiedBadge(item.id) }
+                            }.buttonStyle(.plain).help(String(item.text.prefix(2000)))
+                                .contextMenu { Button(L10n.tr("删除"), role: .destructive) { history.removeText(item.id) } }
+                        }
+                    }
+                    if history.texts.isEmpty { emptyHint("尚无复制的文字") }
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
