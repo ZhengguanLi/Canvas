@@ -13,8 +13,16 @@ extension CardColor {
         }
     }
 
+    /// Opaque card colour: 20% of the hue mixed into the window colour, resolved per appearance,
+    /// so a tinted canvas never shows through.
     var fill: Color {
-        self == .neutral ? Color(nsColor: .windowBackgroundColor) : Color(nsColor: nsColor).opacity(0.20)
+        let base = Color(nsColor: .windowBackgroundColor)
+        return self == .neutral ? base : base.mix(with: Color(nsColor: nsColor), by: 0.2)
+    }
+
+    /// Translucent wash for areas that should let the canvas show through, such as regions.
+    var wash: Color {
+        self == .neutral ? Color.secondary.opacity(0.2) : Color(nsColor: nsColor).opacity(0.2)
     }
 }
 

@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 struct CanvasBoard: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var language = LanguageController.shared
     @ObservedObject var model: AppModel
     let group: ProjectGroup
@@ -20,15 +21,22 @@ struct CanvasBoard: View {
     var onAddFolders: (() -> Void)?
     var onShowAll: (() -> Void)?
     var minimumSize: CGSize = .zero
+    var minimumHeight: CGFloat = 800
+    @AppStorage(ClipboardAppearance.lastAllCardsColorKey) private var lastAllCardsColor = CardColor.neutral.rawValue
     var alignsToCards = true
     @State private var editingRegion: ProjectRegion?
+    /// The note being edited in place, and its rich text while editing.
+    @State private var inlineNoteID: UUID?
+    @State private var noteDraft = AttributedString()
+    @Environment(\.fontResolutionContext) private var fontContext
+    @State private var hoveredCardID: UUID?
     @State private var selectionRect: CGRect?
     @State private var selectionAdds = false
     @State private var movingIDs: Set<UUID> = []
     @State private var dragOffset: CGSize = .zero
     @State private var alignmentGuides: [CanvasAlignment.Guide] = []
 
-    private var extent: CGSize { CanvasGeometry.extent(cards: group.cards, minimumSize: minimumSize) }
+    private var extent: CGSize { CanvasGeometry.extent(cards: group.cards, minimumSize: minimumSize, minimumHeight: minimumHeight) }
     private var related: Set<UUID> {
         guard highlightDirection != 0 else { return [] }
         return selectedCardIDs.union(group.relatedCardIDs(to: selectedCardIDs, upstream: highlightDirection < 0))
@@ -40,7 +48,26 @@ struct CanvasBoard: View {
                 .contentShape(Rectangle())
                 .contextMenu {
                     if let onBackgroundSettings {
-                        CanvasBackgroundMenu(onCustomize: onBackgroundSettings)
+                        CanvasBackgroundMenu(onCustomize: onBackgroundSettings, groupTheme: Binding(
+                            get: { group.canvasTheme }, set: { model.setCanvasTheme($0, for: group.id) }))
+                    }
+                    if isEditing {
+                        Menu(L10n.tr("所有卡片背景")) {
+                            ForEach(CardColor.allCases) { color in
+                                Button(color.title) {
+                                    model.setCardColor(color, ids: Set(group.cards.map(\.id)), in: group.id)
+                                    lastAllCardsColor = color.rawValue
+                                }
+                            }
+                        }.disabled(group.cards.isEmpty)
+                        ClipboardTextColorMenu()
+                    }
+                    if isEditing {
+                        Button(L10n.tr("新建便签")) {
+                            if let id = withAnimation(.spring(response: 0.35, dampingFraction: 0.7), { model.addNote(to: group.id) }) {
+                                beginEditingNote(id, text: "")
+                            }
+                        }
                     }
                     if let onAddFolders {
                         Button(L10n.tr("添加文件夹（⇧⌘O）"), action: onAddFolders)
@@ -57,7 +84,7 @@ struct CanvasBoard: View {
                 .simultaneousGesture(DragGesture(minimumDistance: 5, coordinateSpace: .named("board"))
                     .onChanged { value in
                         guard isEditing, !isConnecting else { return }
-                        if selectionRect == nil { selectionAdds = NSEvent.modifierFlags.contains(.shift) || NSEvent.modifierFlags.contains(.control) }
+                        if selectionRect == nil { selectionAdds = CanvasInputSupport.currentEventExtendsSelection }
                         selectionRect = CGRect(x: min(value.startLocation.x, value.location.x), y: min(value.startLocation.y, value.location.y), width: abs(value.location.x - value.startLocation.x), height: abs(value.location.y - value.startLocation.y))
                     }
                     .onEnded { _ in
@@ -70,12 +97,12 @@ struct CanvasBoard: View {
             ForEach(group.regions) { region in
                 if let presentation = regionBounds(region) {
                     let bounds = presentation.frame
-                    RoundedRectangle(cornerRadius: 16).fill(region.color.fill.opacity(0.35))
-                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(region.color.fill, lineWidth: 3))
+                    RoundedRectangle(cornerRadius: 16).fill(region.color.wash.opacity(0.35))
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(region.color.wash, lineWidth: 3))
                         .frame(width: bounds.width, height: bounds.height).position(x: bounds.midX, y: bounds.midY)
                         .allowsHitTesting(false)
                     Text(region.name).font(.headline).padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(region.color.fill, in: Capsule())
+                        .background(region.color.wash, in: Capsule())
                         .lineLimit(1).frame(maxWidth: bounds.width)
                         .position(presentation.header)
                         .gesture(DragGesture(coordinateSpace: .global).onChanged { value in
@@ -100,14 +127,28 @@ struct CanvasBoard: View {
             }
             ForEach(group.cards) { card in
                 Group {
-                    if let content = card.clipboard {
+                    if inlineNoteID == card.id {
+                        NoteInlineEditor(text: $noteDraft, onCommit: commitNote)
+                            .background(card.color.fill, in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor, lineWidth: 2))
+                    } else if let content = card.clipboard {
                         CanvasClipboardTile(content: content)
+                            .simultaneousGesture(TapGesture(count: 2).onEnded {
+                                if isEditing, case .note(let text) = content { beginEditingNote(card.id, text: text) }
+                            })
                             .background(card.color.fill, in: RoundedRectangle(cornerRadius: 12))
                             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selectedCardIDs.contains(card.id) || firstConnectionCardID == card.id ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: selectedCardIDs.contains(card.id) || firstConnectionCardID == card.id ? 3 : 1))
                     } else if let project = model.project(for: card) {
                         tile(card, project: project)
                     }
                 }
+                        // Selection lifts the card slightly; new cards drop in from above.
+                        .scaleEffect(selectedCardIDs.contains(card.id) && movingIDs.isEmpty ? 1.03 : 1)
+                        .shadow(color: .black.opacity(selectedCardIDs.contains(card.id) ? 0.18 : 0), radius: 10, y: 5)
+                        .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.75), value: selectedCardIDs.contains(card.id))
+                        .transition(reduceMotion ? .opacity : .asymmetric(
+                            insertion: .offset(y: -18).combined(with: .scale(scale: 0.92)).combined(with: .opacity),
+                            removal: .opacity))
                         .position(center(of: card))
                         .opacity(highlightDirection == 0 || selectedCardIDs.isEmpty || related.contains(card.id) ? 1 : 0.38)
                         .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .global)
@@ -130,8 +171,9 @@ struct CanvasBoard: View {
                                 movingIDs.removeAll()
                                 dragOffset = .zero
                                 alignmentGuides = []
-                            }, including: isEditing && !isConnecting ? .all : .none)
-                        .onTapGesture { handleCardClick(card, extendingSelection: CanvasInputSupport.extendsSelection(NSEvent.modifierFlags)) }
+                            }, including: isEditing && !isConnecting && inlineNoteID != card.id ? .all : .none)
+                        .onTapGesture { handleCardClick(card, extendingSelection: CanvasInputSupport.currentEventExtendsSelection) }
+                        .zIndex(inlineNoteID == card.id ? 1 : 0)
                         .contextMenu {
                             if let partner = selectedPartner(for: card) {
                                 Button {
@@ -144,10 +186,13 @@ struct CanvasBoard: View {
                             }
                             if let project = model.project(for: card) { cardMenu(card, project: project) }
                             else if let content = card.clipboard {
+                                if case .note(let text) = content {
+                                    Button(L10n.tr("编辑便签…")) { beginEditingNote(card.id, text: text) }
+                                }
                                 Button(L10n.tr("复制内容")) { model.copyClipboardContent(content) }
                                 Menu(L10n.tr("卡片背景")) {
                                     ForEach(CardColor.allCases) { color in
-                                        Button(color.title) { model.setCardColor(color, ids: [card.id], in: group.id) }
+                                        Button(color.title) { model.setCardColor(color, ids: selectedCardIDs.contains(card.id) ? selectedCardIDs : [card.id], in: group.id) }
                                     }
                                 }
                                 Button(L10n.tr("从此组移除"), role: .destructive) { model.removeCard(card.id, from: group.id) }
@@ -158,7 +203,7 @@ struct CanvasBoard: View {
         .frame(width: extent.width, height: extent.height, alignment: .topLeading)
         .background {
             if isEditing {
-                CanvasInputSupport(onSelectAll: handleSelectAll).allowsHitTesting(false)
+                CanvasInputSupport(onSelectAll: handleSelectAll, onKey: handleKey).allowsHitTesting(false)
             }
         }
         .sheet(item: $editingRegion) { RegionEditorView(model: model, groupID: group.id, cardIDs: $0.cardIDs, region: $0) }
@@ -230,7 +275,7 @@ struct CanvasBoard: View {
                 context.stroke(path, with: .color(.accentColor), lineWidth: 1)
             }
         }
-        .background(CanvasBackgroundView())
+        .background(CanvasBackgroundView(theme: group.canvasTheme))
     }
 
     private func regionBounds(_ region: ProjectRegion) -> (frame: CGRect, header: CGPoint)? {
@@ -246,6 +291,46 @@ struct CanvasBoard: View {
         CGPoint(x: card.x + 105 + (movingIDs.contains(card.id) ? dragOffset.width : 0), y: card.y + 50 + (movingIDs.contains(card.id) ? dragOffset.height : 0))
     }
 
+    /// Shown while hovering a project card, so common actions skip the context menu.
+    private func quickActions(_ project: Project) -> some View {
+        HStack(spacing: 2) {
+            quickAction("arrow.up.forward.app", L10n.tr("打开项目")) { model.openProject(project) }
+            quickAction("terminal", L10n.tr("在终端中打开")) { model.openProject(project, editorOverride: .terminal) }
+            quickAction("folder", L10n.tr("在 Finder 中显示")) { NSWorkspace.shared.activateFileViewerSelecting([project.folderURL]) }
+            quickAction("doc.on.doc", L10n.tr("复制路径")) {
+                NSPasteboard.general.clearContents(); NSPasteboard.general.setString(project.folderPath, forType: .string)
+            }
+        }
+        .padding(3)
+        .glassEffect(.regular.interactive(), in: Capsule())
+        .padding(5)
+    }
+
+    private func quickAction(_ symbol: String, _ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 10, weight: .medium)).frame(width: 20, height: 18)
+        }
+        .buttonStyle(.borderless)
+        .help(title)
+        .accessibilityLabel(title)
+    }
+
+    /// Status dot plus branch; long branches truncate in the middle so both ends stay readable.
+    private func gitLine(_ status: GitStatus) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(status.health == .clean ? Color.green : status.health == .changed ? Color.orange : Color.gray)
+                .frame(width: 6, height: 6)
+            if status.health == .unavailable {
+                Text(status.summary).lineLimit(1)
+            } else {
+                Text(status.branch).lineLimit(1).truncationMode(.middle)
+                Text("· " + status.changeSummary).lineLimit(1).fixedSize()
+            }
+        }
+        .font(.system(size: 10)).foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
+    }
+
     private func tile(_ card: ProjectCard, project: Project) -> some View {
         VStack(spacing: 7) {
             Text(card.customName ?? project.folderName)
@@ -254,13 +339,26 @@ struct CanvasBoard: View {
                 Text(project.tags.map { "#" + $0 }.joined(separator: " "))
                     .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
             }
-            if let status = model.gitStatuses[project.id] {
-                Text(status.summary).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-            }
+            if let status = model.gitStatuses[project.id] { gitLine(status) }
         }
         .multilineTextAlignment(.center)
         .padding(.horizontal, 12)
         .frame(width: 210, height: 100)
+        .overlay(alignment: .topLeading) {
+            Image(systemName: (model.projectKinds[project.id] ?? .folder).symbol)
+                .font(.system(size: 11)).foregroundStyle(.secondary).padding(9)
+                .accessibilityHidden(true)
+        }
+        .overlay(alignment: .topTrailing) {
+            if hoveredCardID == card.id && movingIDs.isEmpty && !isConnecting {
+                quickActions(project).transition(.opacity)
+            }
+        }
+        .onHover { inside in
+            withAnimation(.easeOut(duration: 0.12)) {
+                if inside { hoveredCardID = card.id } else if hoveredCardID == card.id { hoveredCardID = nil }
+            }
+        }
         .background(card.color.fill, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(firstConnectionCardID == card.id ? Color.orange : selectedCardIDs.contains(card.id) ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: selectedCardIDs.contains(card.id) || firstConnectionCardID == card.id ? 3 : 1))
         .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
@@ -268,7 +366,7 @@ struct CanvasBoard: View {
         .help(project.folderPath + "\n" + L10n.tr("拖动移动；Ctrl / ⇧ 点击多选"))
         .accessibilityLabel(card.customName ?? project.folderName)
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction { handleCardClick(card, extendingSelection: CanvasInputSupport.extendsSelection(NSEvent.modifierFlags)) }
+        .accessibilityAction { handleCardClick(card, extendingSelection: CanvasInputSupport.currentEventExtendsSelection) }
     }
 
     @ViewBuilder private func cardMenu(_ card: ProjectCard, project: Project) -> some View {
@@ -296,6 +394,49 @@ struct CanvasBoard: View {
 
     private func cardTitle(_ card: ProjectCard) -> String {
         card.customName ?? model.project(for: card)?.folderName ?? card.clipboard?.title ?? ""
+    }
+
+    /// Arrow keys move the selection, Return opens (or edits a note), ⌘D duplicates note and clipboard cards.
+    func handleKey(_ key: CanvasInputSupport.Key) -> Bool {
+        guard isEditing, !isConnecting else { return false }
+        let current = selectedCardIDs.count == 1 ? group.cards.first { selectedCardIDs.contains($0.id) } : nil
+        switch key {
+        case .arrow(let direction):
+            guard !group.cards.isEmpty else { return false }
+            if let next = CanvasNavigation.next(from: current, direction: direction, in: group.cards) {
+                selectedCardIDs = [next.id]
+                selectedConnectionID = nil
+            }
+            return true
+        case .open:
+            guard let current else { return false }
+            if let project = model.project(for: current) { model.openProject(project) }
+            else if case .note(let text) = current.clipboard { beginEditingNote(current.id, text: text) }
+            else if let content = current.clipboard { model.copyClipboardContent(content) }
+            return true
+        case .duplicate:
+            let copies = withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { model.duplicateCards(selectedCardIDs, in: group.id) }
+            if !copies.isEmpty { selectedCardIDs = copies }
+            return !copies.isEmpty
+        }
+    }
+
+    func beginEditingNote(_ id: UUID, text: String) {
+        if inlineNoteID != nil { commitNote() }
+        noteDraft = NoteMarkdown.attributed(from: text)
+        selectedCardIDs = [id]
+        inlineNoteID = id
+    }
+
+    /// Saves the in-place edit back as Markdown; fonts set by ⌘B / ⌘I are read through the environment.
+    func commitNote() {
+        guard let id = inlineNoteID else { return }
+        inlineNoteID = nil
+        let markdown = NoteMarkdown.markdown(from: noteDraft) { [fontContext] font in
+            let resolved = font.resolve(in: fontContext)
+            return (resolved.isBold, resolved.isItalic, resolved.isMonospaced)
+        }
+        model.updateNote(id, text: markdown, in: group.id)
     }
 
     func handleSelectAll() {

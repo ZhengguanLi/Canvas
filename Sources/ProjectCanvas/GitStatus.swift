@@ -5,9 +5,15 @@ struct GitStatus: Equatable, Sendable {
     var changedFiles: Int
     var isWorktree: Bool
     var error: String? = nil
+    enum Health { case clean, changed, unavailable }
+    var health: Health { error != nil ? .unavailable : changedFiles == 0 ? .clean : .changed }
+    /// The part after the branch name, kept whole while the branch truncates in the middle.
+    var changeSummary: String {
+        "\(changedFiles == 0 ? L10n.tr("干净") : L10n.format("%d 项变更", changedFiles))\(isWorktree ? " · worktree" : "")"
+    }
     var summary: String {
         if let error { return L10n.tr(error) }
-        return "\(branch) · \(changedFiles == 0 ? L10n.tr("干净") : L10n.format("%d 项变更", changedFiles))\(isWorktree ? " · worktree" : "")"
+        return "\(branch) · \(changeSummary)"
     }
 
     static func parse(_ text: String, isWorktree: Bool) -> GitStatus {

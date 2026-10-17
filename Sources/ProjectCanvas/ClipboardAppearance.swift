@@ -4,6 +4,14 @@ import Foundation
 struct ClipboardAppearance {
     static let imageScaleKey = "clipboardImageScale"
     static let textSizeKey = "clipboardTextSize"
+    /// "follow" uses the color last applied with All Cards Background; otherwise a `CardColor` raw value.
+    static let textColorKey = "clipboardTextCardColor"
+    static let lastAllCardsColorKey = "lastAllCardsColor"
+    static let followCardsColor = "follow"
+
+    static func textCardColor(choice: String, lastAllCards: String) -> CardColor {
+        CardColor(rawValue: choice == followCardsColor ? lastAllCards : choice) ?? .neutral
+    }
     let imageScale: Double
     let textSize: Double
 

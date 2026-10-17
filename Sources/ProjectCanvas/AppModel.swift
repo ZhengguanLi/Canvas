@@ -11,6 +11,7 @@ final class AppModel: ObservableObject {
     @Published var defaultEditor: EditorChoice = .vscode { didSet { if !restoring { persist() } } }
     @Published var defaultOpenInNewWindow = false { didSet { if !restoring { persist() } } }
     @Published private(set) var gitStatuses: [UUID: GitStatus] = [:]
+    @Published private(set) var projectKinds: [UUID: ProjectKind] = [:]
     @Published private(set) var needsRecovery = false
     @Published private(set) var isRefreshingGit = false
     @Published var alertMessage: String?
@@ -226,6 +227,22 @@ final class AppModel: ObservableObject {
             content = .image(data: entry.data, type: entry.type.rawValue, preview: preview)
         }
         return addClipboardContent(content, to: groupID, at: position)
+    }
+
+    /// Adds an empty note below existing cards and returns its id for immediate editing.
+    @discardableResult func addNote(to groupID: UUID, at position: CGPoint? = nil) -> UUID? {
+        guard addClipboardContent(.note(""), to: groupID, at: position) else { return nil }
+        return groups.first(where: { $0.id == groupID })?.cards.last?.id
+    }
+
+    func updateNote(_ cardID: UUID, text: String, in groupID: UUID) {
+        guard let g = groups.firstIndex(where: { $0.id == groupID }),
+              let c = groups[g].cards.firstIndex(where: { $0.id == cardID }),
+              case .note(let current) = groups[g].cards[c].clipboard, current != text,
+              CanvasClipboardContent.note(text).isValid else { return }
+        recordUndo()
+        groups[g].cards[c].clipboard = .note(text)
+        persist()
     }
 
     @discardableResult func addClipboardContent(_ content: CanvasClipboardContent, to groupID: UUID, at position: CGPoint? = nil) -> Bool {
@@ -490,6 +507,30 @@ final class AppModel: ObservableObject {
         persist()
     }
 
+    /// Not an undo step: slider drags would otherwise flood the undo history.
+    func setCanvasTheme(_ theme: GroupCanvasTheme?, for groupID: UUID) {
+        guard let index = groups.firstIndex(where: { $0.id == groupID }), groups[index].canvasTheme != theme else { return }
+        groups[index].canvasTheme = theme
+        persist(rotatingBackup: false)
+    }
+
+    /// Duplicates note and clipboard cards; a project appears at most once per group, so project cards are skipped.
+    @discardableResult func duplicateCards(_ ids: Set<UUID>, in groupID: UUID) -> Set<UUID> {
+        guard let index = groups.firstIndex(where: { $0.id == groupID }) else { return [] }
+        let sources = groups[index].cards.filter { ids.contains($0.id) && $0.clipboard != nil }
+        guard !sources.isEmpty else { return [] }
+        recordUndo()
+        let copies = sources.compactMap { source -> ProjectCard? in
+            guard let content = source.clipboard else { return nil }
+            var copy = ProjectCard(clipboard: content, x: source.x + 24, y: source.y + 24)
+            copy.color = source.color
+            return copy
+        }
+        groups[index].cards.append(contentsOf: copies)
+        persist()
+        return Set(copies.map(\.id))
+    }
+
     func removeCard(_ cardID: UUID, from groupID: UUID) {
         guard let groupIndex = groups.firstIndex(where: { $0.id == groupID }) else { return }
         guard groups[groupIndex].cards.contains(where: { $0.id == cardID }) else { return }
@@ -534,8 +575,9 @@ final class AppModel: ObservableObject {
         projects.first { $0.id == card.projectID }
     }
 
-    func openProject(_ project: Project) {
-        let editor = project.editor ?? defaultEditor
+    /// `editorOverride` opens with a specific app once without changing the project's setting.
+    func openProject(_ project: Project, editorOverride: EditorChoice? = nil) {
+        let editor = editorOverride ?? project.editor ?? defaultEditor
         let newWindow = project.openInNewWindow ?? defaultOpenInNewWindow
         Task {
             do {
@@ -618,17 +660,20 @@ final class AppModel: ObservableObject {
         isRefreshingGit = true
         defer { isRefreshingGit = false }
         let snapshot = projects.map { ($0.id, $0.folderPath) }
-        await withTaskGroup(of: (UUID, String, GitStatus).self) { tasks in
+        await withTaskGroup(of: (UUID, String, GitStatus, ProjectKind).self) { tasks in
             var remaining = snapshot.makeIterator()
             func enqueue(_ project: (UUID, String)) {
                 tasks.addTask(priority: .utility) {
-                    let status = GitStatus.read(at: URL(fileURLWithPath: project.1))
-                    return (project.0, project.1, status)
+                    let url = URL(fileURLWithPath: project.1)
+                    return (project.0, project.1, GitStatus.read(at: url), ProjectKind.detect(at: url))
                 }
             }
             for _ in 0..<3 { if let project = remaining.next() { enqueue(project) } }
-            while let (id, path, status) = await tasks.next() {
-                if projects.contains(where: { $0.id == id && $0.folderPath == path }) { gitStatuses[id] = status }
+            while let (id, path, status, kind) = await tasks.next() {
+                if projects.contains(where: { $0.id == id && $0.folderPath == path }) {
+                    gitStatuses[id] = status
+                    if projectKinds[id] != kind { projectKinds[id] = kind }
+                }
                 if !Task.isCancelled, let project = remaining.next() { enqueue(project) }
             }
         }

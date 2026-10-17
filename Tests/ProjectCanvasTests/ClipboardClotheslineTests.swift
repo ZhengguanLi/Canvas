@@ -13,14 +13,15 @@ final class ClipboardClotheslineTests: XCTestCase {
                     .font(.system(size: 14)).frame(width: 180, height: 90).padding(8)
                     .hangingClipboardCard(id: id)
             }
-        }.frame(height: 150).padding(16).background(Color(nsColor: .windowBackgroundColor))
+        }.frame(height: 150).padding(16).background(Color(nsColor: .textBackgroundColor))
         let host = NSHostingView(rootView: view)
         host.frame = CGRect(x: 0, y: 0, width: 760, height: 182)
         host.layoutSubtreeIfNeeded()
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)
-        XCTAssertNotEqual(try XCTUnwrap(bitmap.colorAt(x: 50, y: 75)),
-                          try XCTUnwrap(bitmap.colorAt(x: 50, y: 10)))
+        // The first card's clip hangs at its horizontal centre, just below the rope.
+        XCTAssertNotEqual(try XCTUnwrap(bitmap.color(atPoint: CGPoint(x: 126, y: 38), in: host.bounds)),
+                          try XCTUnwrap(bitmap.color(atPoint: CGPoint(x: 50, y: 10), in: host.bounds)))
         if let path = ProcessInfo.processInfo.environment["PROJECTCANVAS_CLOTHESLINE_PREVIEW"] {
             try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: path))
         }
@@ -44,6 +45,6 @@ final class ClipboardClotheslineTests: XCTestCase {
         }
         let id = UUID()
         XCTAssertEqual(ClipboardClotheslineGeometry.tilt(for: id), ClipboardClotheslineGeometry.tilt(for: id))
-        XCTAssertLessThanOrEqual(abs(ClipboardClotheslineGeometry.tilt(for: id)), 2)
+        XCTAssertLessThanOrEqual(abs(ClipboardClotheslineGeometry.tilt(for: id)), 0.8)
     }
 }

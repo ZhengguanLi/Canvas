@@ -35,7 +35,7 @@ struct MainWindow: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
-                .background(CanvasBackgroundView())
+                .background(Color(nsColor: .textBackgroundColor))
             }
         }
         .navigationTitle(model.selectedGroup?.name ?? "ProjectCanvas")
@@ -73,7 +73,7 @@ struct MainWindow: View {
                     if clipboardVisible {
                         ClipboardShelfView(history: model.clipboardHistory, allowsFullScreen: false, canvasClotheslineMode: true, showsSamples: true,
                             onAddToCanvas: { item in
-                                if let groupID = model.selectedGroupID { model.addClipboardItem(item, to: groupID) }
+                                if let groupID = model.selectedGroupID { withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { _ = model.addClipboardItem(item, to: groupID) } }
                             }, onClose: { clipboardVisible = false; notifyClipboardDisplayChange() })
                             .frame(maxWidth: clipboardFullWidth ? .infinity : 1100)
                             .frame(maxWidth: .infinity)
@@ -83,13 +83,10 @@ struct MainWindow: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L10n.tr("工作区")).font(.caption).foregroundStyle(.secondary)
-                    Text(L10n.tr("项目组")).font(.title3.weight(.semibold))
-                }
+                Text(L10n.tr("项目组")).font(.title3.weight(.semibold))
                 Spacer()
-                Button(action: model.addGroup) { Image(systemName: "plus") }
-                    .buttonStyle(.bordered)
+                Button(action: model.addGroup) { Image(systemName: "plus").font(.body.weight(.medium)) }
+                    .buttonStyle(.borderless)
                     .help(L10n.tr("新建项目组"))
             }.padding(.horizontal, 14).padding(.top, 18)
             Button { showsSearch = true } label: {
@@ -107,7 +104,9 @@ struct MainWindow: View {
                                 Image(systemName: "square.grid.2x2")
                                 Text(group.name).lineLimit(1)
                                 Spacer(minLength: 0)
-                                Text("\(group.cards.count)").font(.caption).foregroundStyle(.secondary)
+                                if !group.cards.isEmpty {
+                                    Text("\(group.cards.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                }
                             }
                             .padding(.horizontal, 10)
                             .padding(.vertical, 9)
@@ -155,8 +154,7 @@ struct MainWindow: View {
                     Label(L10n.tr("设置"), systemImage: "gearshape").frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .keyboardShortcut(",", modifiers: .command)
-                Text(L10n.tr("数据保存在这台 Mac 上 · ⌘⇧空格 显示桌面卡片"))
-                    .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true).padding(.top, 3)
+                .help(L10n.tr("数据保存在这台 Mac 上 · ⌘⇧空格 显示桌面卡片"))
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 12)
@@ -193,6 +191,9 @@ private struct GroupWorkspace<Clotheslines: View>: View {
     @State private var projectDetails: Project?
     @State private var loadedViewport = false
     @State private var fitsWindow = false
+    @State private var canvasSize = CGSize.zero
+    @Namespace private var glassNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pinchStart: Double?
     @State private var selectedTag = ""
     @State private var showsBackgroundSettings = false
@@ -208,24 +209,18 @@ private struct GroupWorkspace<Clotheslines: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "tag").foregroundStyle(.secondary).accessibilityHidden(true)
-                Picker(L10n.tr("标签筛选"), selection: $selectedTag) {
-                    Text(L10n.tr("全部标签")).tag("")
-                    ForEach(model.tags(in: group), id: \.self) { Text($0).tag($0) }
-                }.labelsHidden().frame(width: 160).controlSize(.small)
-                    .help(L10n.tr("标签筛选"))
-                if !selectedTag.isEmpty {
-                    Text(L10n.format("显示 %d / %d 个项目", visibleGroup.cards.count, group.cards.count)).font(.caption).foregroundStyle(.secondary)
-                    Button(L10n.tr("清除筛选")) { selectedTag = "" }
-                }
-                Spacer()
-                Text(selectedCardIDs.isEmpty ? L10n.tr("拖框选择 · Ctrl / ⇧ 追加") : L10n.format("已选 %d 张", selectedCardIDs.count))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }.padding(.horizontal, 16).padding(.vertical, 10)
             GeometryReader { geometry in
                 ZStack {
-                    let size = CanvasGeometry.extent(cards: visibleGroup.cards)
+                    // The canvas runs under the glass toolbar (macOS 26). A neutral band the height of the
+                    // toolbar keeps the title area untinted, like a hard scroll-edge effect.
+                    CanvasBackgroundView(theme: group.canvasTheme)
+                        .overlay(alignment: .top) {
+                            Color(nsColor: .windowBackgroundColor)
+                                .frame(height: geometry.safeAreaInsets.top)
+                                .allowsHitTesting(false)
+                        }
+                        .ignoresSafeArea(edges: .top)
+                    let size = CanvasGeometry.extent(cards: visibleGroup.cards, minimumHeight: 0)
                     CanvasScrollView(size: CGSize(width: max(geometry.size.width, size.width * zoom), height: max(geometry.size.height, (size.height + clotheslineHeight) * zoom)), offset: $offset, onViewportCommit: { [zoom] position in
                         fitsWindow = false
                         model.updateViewport(CanvasViewport(zoom: zoom, offsetX: position.x, offsetY: position.y), in: group.id)
@@ -241,11 +236,11 @@ private struct GroupWorkspace<Clotheslines: View>: View {
                                         highlightDirection: highlightDirection, onOpenSettings: { projectToConfigure = $0 }, onRelocate: relocate,
                                         onOpenDetails: { projectDetails = $0 }, onBackgroundSettings: { showsBackgroundSettings = true },
                                         onAddFolders: chooseFolders, onShowAll: { fit(in: geometry.size) },
-                                        minimumSize: CGSize(width: size.width, height: max(0, geometry.size.height / zoom - clotheslineHeight)),
+                                        minimumSize: CGSize(width: size.width, height: max(0, geometry.size.height / zoom - clotheslineHeight)), minimumHeight: 0,
                                         alignsToCards: alignsToCards)
                                 .background {
                                     Color.clear.contentShape(Rectangle()).contextMenu {
-                                        CanvasBackgroundMenu { showsBackgroundSettings = true }
+                                        CanvasBackgroundMenu(onCustomize: { showsBackgroundSettings = true }, groupTheme: groupThemeBinding)
                                         Button(L10n.tr("添加文件夹（⇧⌘O）"), action: chooseFolders)
                                         Button(L10n.tr("适应视图")) { fit(in: geometry.size) }
                                     }
@@ -268,34 +263,60 @@ private struct GroupWorkspace<Clotheslines: View>: View {
                             Label(L10n.tr("没有匹配的项目"), systemImage: "line.3.horizontal.decrease.circle")
                         } actions: { Button(L10n.tr("清除筛选")) { selectedTag = "" } }
                     }
-                    VStack {
+                    // Glass elements float directly over the canvas. Shapes in one container blend when
+                    // closer than its spacing, so it stays below the gaps to keep each element separate.
+                    let extent = CanvasGeometry.extent(cards: visibleGroup.cards, minimumHeight: 0)
+                    let showsMinimap = !visibleGroup.cards.isEmpty &&
+                        CanvasMinimap.isUseful(extent: extent, clotheslineHeight: clotheslineHeight, zoom: zoom, viewport: geometry.size)
+                    GlassEffectContainer(spacing: 2) {
+                    VStack(alignment: .trailing, spacing: 10) {
                         Spacer()
-                        HStack {
+                        if showsMinimap {
+                            CanvasMinimap(cards: visibleGroup.cards, clotheslineHeight: clotheslineHeight, extent: extent,
+                                          zoom: zoom, viewport: geometry.size, offset: Binding(get: { offset }, set: { fitsWindow = false; offset = $0 }))
+                                .glassEffectID("minimap", in: glassNamespace)
+                                .padding(.trailing, 14)
+                        }
+                        HStack(spacing: 8) {
                             if isConnecting { Text(firstConnectionCardID == nil ? L10n.tr("先点起点，再点终点") : L10n.tr("点击终点完成连线")).font(.caption) }
+                            if !selectedTag.isEmpty {
+                                Label(L10n.format("%@ · 显示 %d / %d 个项目", selectedTag, visibleGroup.cards.count, group.cards.count),
+                                      systemImage: "line.3.horizontal.decrease.circle.fill")
+                                    .font(.caption).lineLimit(1)
+                                Button(L10n.tr("清除筛选")) { selectedTag = "" }
+                                    .buttonStyle(.glassProminent)
+                            }
+                            if !selectedCardIDs.isEmpty {
+                                Text(L10n.format("已选 %d 张", selectedCardIDs.count)).font(.caption)
+                            }
                             Button(L10n.tr("适应视图")) { fit(in: geometry.size) }
                             Button(L10n.tr("回到卡片")) {
                                 fitsWindow = false
                                 offset = .zero
                             }
                         }
-                        .font(.callout)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
+                        .foregroundStyle(.secondary)
                         .modifier(CanvasFloatingControls())
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding([.horizontal, .bottom], 14)
                     }
+                    }
+                    .animation(reduceMotion ? nil : .smooth(duration: 0.35), value: showsMinimap)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 .dropDestination(for: ClipboardCanvasTransfer.self) { items, location in
                     guard let item = items.first else { return false }
-                    let added = model.addClipboardItem(item, to: group.id,
-                        at: CanvasGeometry.positionForDrop(
-                            at: CGPoint(x: location.x - max(0, (geometry.size.width - CanvasGeometry.extent(cards: visibleGroup.cards).width * zoom) / 2),
-                                        y: location.y - clotheslineHeight * zoom), zoom: zoom, scrollOffset: offset))
+                    let position = CanvasGeometry.positionForDrop(
+                        at: CGPoint(x: location.x - max(0, (geometry.size.width - CanvasGeometry.extent(cards: visibleGroup.cards).width * zoom) / 2),
+                                    y: location.y - clotheslineHeight * zoom), zoom: zoom, scrollOffset: offset)
+                    let added = withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                        model.addClipboardItem(item, to: group.id, at: position)
+                    }
                     if added { selectedTag = "" }
                     return added
                 }
+                .onAppear { canvasSize = geometry.size }
                 .onChange(of: geometry.size) { _, size in
+                    canvasSize = size
                     if fitsWindow { fit(in: size) }
                 }
                 .onChange(of: clotheslineHeight) { _, _ in
@@ -303,7 +324,6 @@ private struct GroupWorkspace<Clotheslines: View>: View {
                 }
             }
         }
-        .background(CanvasBackgroundView())
         .toolbar { workspaceToolbar }
         .onChange(of: canvasTintColor) { _, _ in refreshDesktopBackground() }
         .onChange(of: canvasTintOpacity) { _, _ in refreshDesktopBackground() }
@@ -352,35 +372,65 @@ private struct GroupWorkspace<Clotheslines: View>: View {
                 Label(L10n.tr("刷新 Git 状态"), systemImage: "arrow.clockwise")
             }.disabled(model.isRefreshingGit)
         }
-        if #available(macOS 26.0, *) {
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-        }
+        ToolbarSpacer(.fixed, placement: .primaryAction)
         ToolbarItemGroup(placement: .primaryAction) {
+            tagFilterMenu
             editingMenu
-            Button(action: deleteSelection) {
-                Label(L10n.tr("删除选中项"), systemImage: "trash")
-            }.disabled(selectedCardIDs.isEmpty && selectedConnectionID == nil)
-            Button { model.undo() } label: {
-                Label(L10n.tr("撤销"), systemImage: "arrow.uturn.backward")
-            }.keyboardShortcut("z", modifiers: .command).disabled(!model.canUndo)
-            Button { model.redo() } label: {
-                Label(L10n.tr("重做"), systemImage: "arrow.uturn.forward")
-            }.keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!model.canRedo)
         }
-        if #available(macOS 26.0, *) {
-            ToolbarSpacer(.fixed, placement: .primaryAction)
+        ToolbarSpacer(.fixed, placement: .primaryAction)
+        ToolbarItem(placement: .primaryAction) { zoomControl }
+    }
+
+    private var tagFilterMenu: some View {
+        Menu {
+            Picker(L10n.tr("标签筛选"), selection: $selectedTag) {
+                Text(L10n.tr("全部标签")).tag("")
+                ForEach(model.tags(in: group), id: \.self) { Text($0).tag($0) }
+            }.pickerStyle(.inline)
+        } label: {
+            Label(L10n.tr("标签筛选"), systemImage: selectedTag.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
         }
-        ToolbarItemGroup(placement: .primaryAction) {
+        .help(selectedTag.isEmpty ? L10n.tr("标签筛选") : L10n.format("标签：%@", selectedTag))
+    }
+
+    /// Undo/redo live in the Edit menu; zoom is one compact control instead of three items.
+    private var zoomControl: some View {
+        ControlGroup {
             Button { fitsWindow = false; zoom = max(0.1, zoom - 0.1) } label: {
                 Label(L10n.tr("缩小"), systemImage: "minus.magnifyingglass")
+            }.keyboardShortcut("-", modifiers: .command)
+            Menu {
+                Button(L10n.tr("适应视图")) { fit(in: canvasSize) }
+                Divider()
+                ForEach([0.5, 0.75, 1, 1.5, 2], id: \.self) { level in
+                    Button("\(Int(level * 100))%") { fitsWindow = false; zoom = level }
+                }
+            } label: {
+                Text("\(Int(zoom * 100))%").font(.caption.monospacedDigit())
             }
-            Text("\(Int(zoom * 100))%")
-                .font(.caption.monospacedDigit()).frame(width: 38)
-                .accessibilityLabel(L10n.tr("缩放比例"))
+            .accessibilityLabel(L10n.tr("缩放比例"))
+            .help(L10n.tr("缩放比例"))
             Button { fitsWindow = false; zoom = min(2, zoom + 0.1) } label: {
                 Label(L10n.tr("放大"), systemImage: "plus.magnifyingglass")
-            }
+            }.keyboardShortcut("=", modifiers: .command)
         }
+    }
+
+    private var groupThemeBinding: Binding<GroupCanvasTheme?> {
+        Binding(get: { group.canvasTheme }, set: { model.setCanvasTheme($0, for: group.id) })
+    }
+
+    /// Edits the group's own theme when it has one, otherwise the shared background.
+    private var themeColorBinding: Binding<String> {
+        Binding(get: { group.canvasTheme?.colorHex ?? canvasTintColor }, set: { hex in
+            if var theme = group.canvasTheme { theme.colorHex = hex; model.setCanvasTheme(theme, for: group.id) } else { canvasTintColor = hex }
+        })
+    }
+
+    private var themeOpacityBinding: Binding<Double> {
+        Binding(get: { group.canvasTheme?.opacity ?? canvasTintOpacity }, set: { value in
+            if var theme = group.canvasTheme { theme.opacity = value; model.setCanvasTheme(theme, for: group.id) } else { canvasTintOpacity = value }
+        })
     }
 
     private var backgroundButton: some View {
@@ -390,12 +440,16 @@ private struct GroupWorkspace<Clotheslines: View>: View {
         .popover(isPresented: $showsBackgroundSettings) {
             VStack(alignment: .leading, spacing: 14) {
                 Text(L10n.tr("画布背景")).font(.headline)
-                BackgroundTintControls(colorHex: $canvasTintColor, opacity: $canvasTintOpacity)
-                Text(L10n.tr("颜色和浓度同时应用于内容区与桌面磨砂背景。"))
+                Toggle(L10n.format("仅用于“%@”", group.name), isOn: Binding(
+                    get: { group.canvasTheme != nil },
+                    set: { model.setCanvasTheme($0 ? GroupCanvasTheme(colorHex: canvasTintColor, opacity: canvasTintOpacity) : nil, for: group.id) }))
+                BackgroundTintControls(colorHex: themeColorBinding, opacity: themeOpacityBinding)
+                Text(L10n.tr(group.canvasTheme == nil ? "颜色和浓度同时应用于内容区与桌面磨砂背景。" : "只改变这个组的画布，其他组和桌面背景不受影响。"))
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button(L10n.tr("恢复默认外观")) {
-                        canvasTintColor = BackgroundTintColor.default.hex; canvasTintOpacity = 0
+                        if group.canvasTheme != nil { model.setCanvasTheme(nil, for: group.id) }
+                        else { canvasTintColor = BackgroundTintColor.default.hex; canvasTintOpacity = 0 }
                     }
                     Spacer()
                     Button(L10n.tr("完成")) { showsBackgroundSettings = false }
@@ -433,6 +487,9 @@ private struct GroupWorkspace<Clotheslines: View>: View {
             if let id = selectedConnectionID, let edge = group.connections.first(where: { $0.id == id }) {
                 Button(L10n.tr("连线属性")) { connectionToConfigure = edge }
             }
+            Divider()
+            Button(L10n.tr("删除选中项"), role: .destructive, action: deleteSelection)
+                .disabled(selectedCardIDs.isEmpty && selectedConnectionID == nil)
         } label: {
             Label(L10n.tr("编辑"), systemImage: "slider.horizontal.3")
         }

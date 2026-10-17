@@ -20,9 +20,10 @@ enum CanvasGeometry {
         return (frame, CGPoint(x: frame.midX, y: headerBelow ? bottom - 18 : top + 18))
     }
 
-    static func extent(cards: [ProjectCard], minimumSize: CGSize = .zero) -> CGSize {
+    /// `minimumHeight` is 0 where the caller sizes the canvas to its viewport, so it only scrolls when cards overflow.
+    static func extent(cards: [ProjectCard], minimumSize: CGSize = .zero, minimumHeight: CGFloat = 800) -> CGSize {
         CGSize(width: max(1200, minimumSize.width, (cards.map(\.x).max() ?? 0) + 330),
-               height: max(800, minimumSize.height, (cards.map(\.y).max() ?? 0) + 220))
+               height: max(minimumHeight, minimumSize.height, (cards.map(\.y).max() ?? 0) + 220))
     }
 
     static func clampedOffset(_ proposed: CGSize, cards: [ProjectCard]) -> CGSize {

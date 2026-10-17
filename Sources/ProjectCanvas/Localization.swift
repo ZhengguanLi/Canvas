@@ -115,6 +115,7 @@ enum L10n {
         "打开项目后显示在这里": "Projects appear here after opening", "打开 %d 次": "Opened %d times",
         "标签筛选": "Filter by Tag", "全部标签": "All Tags", "清除筛选": "Clear Filter",
         "显示 %d / %d 个项目": "Showing %d of %d projects",
+        "%@ · 显示 %d / %d 个项目": "%@ · Showing %d of %d projects", "标签：%@": "Tag: %@", "所有卡片背景": "All Cards Background", "⌘B 粗体 · ⌘I 斜体 · Esc 完成": "⌘B Bold · ⌘I Italic · Esc Done", "仅用于此组": "This Group Only", "仅用于“%@”": "Only for “%@”", "只改变这个组的画布，其他组和桌面背景不受影响。": "Changes only this group’s canvas. Other groups and the desktop background are unaffected.", "点击或拖动以移动视图": "Click or drag to move the view", "画布小地图": "Canvas Minimap", "在终端中打开": "Open in Terminal", "固定": "Pin", "取消固定": "Unpin", "已固定": "Pinned", "便签": "Note", "新建便签": "New Note", "编辑便签…": "Edit Note…", "双击编辑便签": "Double-click to edit", "剪贴板文字背景": "Clipboard Text Background", "跟随所有卡片背景": "Follow All Cards Background",
         "剪贴板": "Clipboard", "本次运行 · 每类最多 50 条": "This session · Up to 50 per category",
         "继续记录": "Resume", "暂停记录": "Pause", "图片": "Images", "文字": "Text",
         "清空": "Clear", "删除": "Delete", "尚无复制的图片": "No copied images yet",

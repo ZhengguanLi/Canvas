@@ -3,18 +3,21 @@ import Combine
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Session-only history; only content explicitly placed on a canvas is persisted.
+/// Session-only history; only content placed on a canvas, and pinned text, is persisted.
+/// Pinned items sort first, never count toward limits, and survive Clear; only Delete removes them.
 @MainActor
 final class ClipboardHistory: ObservableObject {
     struct TextItem: Identifiable {
         let id = UUID()
         let text: String
+        var isPinned = false
     }
     struct ImageItem: Identifiable {
         let id = UUID()
         let data: Data
         let type: NSPasteboard.PasteboardType
         let thumbnail: NSImage
+        var isPinned = false
     }
     struct PreparedImage: Sendable {
         let data: Data
@@ -26,6 +29,7 @@ final class ClipboardHistory: ObservableObject {
     nonisolated static let maximumImageBytes = 8 * 1024 * 1024
     static let textLimitKey = "clipboardTextLimit"
     static let imageLimitKey = "clipboardImageLimit"
+    static let pinnedTextsKey = "clipboardPinnedTexts"
     private let preferences: UserDefaults
     @Published private(set) var textLimit: Int
     @Published private(set) var imageLimit: Int
@@ -46,6 +50,9 @@ final class ClipboardHistory: ObservableObject {
         self.preferences = preferences
         textLimit = limit.map { max(1, $0) } ?? Self.normalizedLimit((preferences.object(forKey: Self.textLimitKey) as? Int) ?? 50)
         imageLimit = limit.map { max(1, $0) } ?? Self.normalizedLimit((preferences.object(forKey: Self.imageLimitKey) as? Int) ?? 50)
+        texts = (preferences.stringArray(forKey: Self.pinnedTextsKey) ?? [])
+            .filter { $0.utf8.count <= Self.maximumTextBytes }
+            .map { TextItem(text: $0, isPinned: true) }
     }
 
     static let limitPresets = [25, 50, 100, 0]
@@ -62,8 +69,8 @@ final class ClipboardHistory: ObservableObject {
         if let images { imageLimit = Self.normalizedLimit(images) }
         preferences.set(textLimit, forKey: Self.textLimitKey)
         preferences.set(imageLimit, forKey: Self.imageLimitKey)
-        if textLimit > 0 && texts.count > textLimit { texts.removeSubrange(textLimit...) }
-        if imageLimit > 0 && self.images.count > imageLimit { self.images.removeSubrange(imageLimit...) }
+        trimTexts()
+        trimImages()
     }
     deinit { timer?.invalidate() }
 
@@ -114,10 +121,11 @@ final class ClipboardHistory: ObservableObject {
     func receiveText(_ text: String) {
         guard !isPaused, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               text.utf8.count <= Self.maximumTextBytes else { return }
+        if texts.contains(where: { $0.text == text && $0.isPinned }) { return }
         let existing = texts.first { $0.text == text }
         texts.removeAll { $0.text == text }
-        texts.insert(existing ?? TextItem(text: text), at: 0)
-        while (textLimit > 0 && texts.count > textLimit) || texts.reduce(0, { $0 + $1.text.utf8.count }) > 2 * 1024 * 1024 { texts.removeLast() }
+        texts.insert(existing ?? TextItem(text: text), at: texts.filter(\.isPinned).count)
+        trimTexts()
     }
 
     nonisolated static func prepareImage(_ data: Data) -> PreparedImage? {
@@ -141,10 +149,11 @@ final class ClipboardHistory: ObservableObject {
 
     func receiveImage(_ image: PreparedImage, type: NSPasteboard.PasteboardType) {
         guard !isPaused, let thumbnail = NSImage(data: image.thumbnail) else { return }
+        if images.contains(where: { $0.data == image.data && $0.type == type && $0.isPinned }) { return }
         let existing = images.first { $0.data == image.data && $0.type == type }
         images.removeAll { $0.data == image.data && $0.type == type }
-        images.insert(existing ?? ImageItem(data: image.data, type: type, thumbnail: thumbnail), at: 0)
-        while (imageLimit > 0 && images.count > imageLimit) || images.reduce(0, { $0 + $1.data.count }) > 64 * 1024 * 1024 { images.removeLast() }
+        images.insert(existing ?? ImageItem(data: image.data, type: type, thumbnail: thumbnail), at: images.filter(\.isPinned).count)
+        trimImages()
     }
 
     @discardableResult func copyText(_ id: UUID) -> Bool {
@@ -165,8 +174,50 @@ final class ClipboardHistory: ObservableObject {
         return success
     }
 
-    func removeText(_ id: UUID) { texts.removeAll { $0.id == id } }
+    func removeText(_ id: UUID) {
+        let wasPinned = texts.contains { $0.id == id && $0.isPinned }
+        texts.removeAll { $0.id == id }
+        if wasPinned { savePinnedTexts() }
+    }
     func removeImage(_ id: UUID) { images.removeAll { $0.id == id } }
-    func clearTexts() { texts.removeAll() }
-    func clearImages() { generation += 1; images.removeAll() }
+    func clearTexts() { texts.removeAll { !$0.isPinned } }
+    func clearImages() { generation += 1; images.removeAll { !$0.isPinned } }
+
+    func togglePin(text id: UUID) {
+        guard let index = texts.firstIndex(where: { $0.id == id }) else { return }
+        var item = texts.remove(at: index)
+        item.isPinned.toggle()
+        texts.insert(item, at: item.isPinned ? 0 : texts.filter(\.isPinned).count)
+        trimTexts()
+        savePinnedTexts()
+    }
+
+    func togglePin(image id: UUID) {
+        guard let index = images.firstIndex(where: { $0.id == id }) else { return }
+        var item = images.remove(at: index)
+        item.isPinned.toggle()
+        images.insert(item, at: item.isPinned ? 0 : images.filter(\.isPinned).count)
+        trimImages()
+    }
+
+    /// Evicts the oldest unpinned items; pinned items are exempt from count limits.
+    private func trimTexts() {
+        while (textLimit > 0 && texts.filter({ !$0.isPinned }).count > textLimit) ||
+                texts.reduce(0, { $0 + $1.text.utf8.count }) > 2 * 1024 * 1024,
+              let index = texts.lastIndex(where: { !$0.isPinned }) {
+            texts.remove(at: index)
+        }
+    }
+
+    private func trimImages() {
+        while (imageLimit > 0 && images.filter({ !$0.isPinned }).count > imageLimit) ||
+                images.reduce(0, { $0 + $1.data.count }) > 64 * 1024 * 1024,
+              let index = images.lastIndex(where: { !$0.isPinned }) {
+            images.remove(at: index)
+        }
+    }
+
+    private func savePinnedTexts() {
+        preferences.set(texts.filter(\.isPinned).map(\.text), forKey: Self.pinnedTextsKey)
+    }
 }

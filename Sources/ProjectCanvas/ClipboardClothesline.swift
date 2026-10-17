@@ -11,8 +11,9 @@ enum ClipboardClotheslineGeometry {
         return ropeTop + 4 * min(8, width * 0.008) * fraction * (1 - fraction)
     }
 
+    /// Kept within ±0.8° so hanging text stays easy to read.
     static func tilt(for id: UUID) -> Double {
-        Double(id.uuid.0 % 5) - 2
+        (Double(id.uuid.0 % 5) - 2) * 0.4
     }
 }
 
@@ -68,6 +69,7 @@ private extension EnvironmentValues {
 
 private struct HangingClipboardCard<Content: View>: View {
     let id: UUID
+    var tint: CardColor = .neutral
     let content: Content
     @Environment(\.clipboardRopeSpace) private var ropeSpace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -86,8 +88,9 @@ private struct HangingClipboardCard<Content: View>: View {
                 .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
                 .zIndex(1)
             content
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.45), lineWidth: 0.75))
+                // Same surface, corner radius and border as canvas cards; only the clip says "hanging".
+                .background(tint.fill, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1))
                 .shadow(color: .black.opacity(hovering ? 0.2 : 0.1), radius: hovering ? 6 : 3, y: 3)
         }
         .background(alignment: .top) {
@@ -110,7 +113,7 @@ private struct HangingClipboardCard<Content: View>: View {
 }
 
 extension View {
-    func hangingClipboardCard(id: UUID) -> some View {
-        HangingClipboardCard(id: id, content: self)
+    func hangingClipboardCard(id: UUID, tint: CardColor = .neutral) -> some View {
+        HangingClipboardCard(id: id, tint: tint, content: self)
     }
 }

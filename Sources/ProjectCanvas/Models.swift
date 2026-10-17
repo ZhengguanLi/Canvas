@@ -113,6 +113,12 @@ struct ProjectConnection: Identifiable, Codable, Equatable {
     }
 }
 
+/// A group's own canvas background; nil on the group means it follows the shared background.
+struct GroupCanvasTheme: Codable, Equatable {
+    var colorHex: String
+    var opacity: Double
+}
+
 struct ProjectGroup: Identifiable, Codable, Equatable {
     var id: UUID
     var name: String
@@ -127,6 +133,7 @@ struct ProjectGroup: Identifiable, Codable, Equatable {
         set { storedRegions = newValue }
     }
     var showsConnections: Bool
+    var canvasTheme: GroupCanvasTheme?
 
     init(id: UUID = UUID(), name: String, cards: [ProjectCard] = [], connections: [ProjectConnection] = [], showsConnections: Bool = false) {
         self.id = id

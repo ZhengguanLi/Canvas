@@ -14,7 +14,11 @@ struct ClipboardShelfView: View {
     @AppStorage("clipboardShelfFullScreen") private var fullScreen = false
     @AppStorage(ClipboardAppearance.imageScaleKey) private var imageScale = 1.25
     @AppStorage(ClipboardAppearance.textSizeKey) private var textSize = 14.0
+    @AppStorage(ClipboardAppearance.textColorKey) private var textColorChoice = ClipboardAppearance.followCardsColor
+    @AppStorage(ClipboardAppearance.lastAllCardsColorKey) private var lastAllCardsColor = CardColor.neutral.rawValue
+    private var textTint: CardColor { ClipboardAppearance.textCardColor(choice: textColorChoice, lastAllCards: lastAllCardsColor) }
     @State private var showsSizing = false
+    @State private var hoveredSection: String?
     @State private var sizingCategory = ""
     private var appearance: ClipboardAppearance { ClipboardAppearance(imageScale: imageScale, textSize: textSize) }
     private static let sampleImageIDs = [UUID(), UUID(), UUID()]
@@ -79,12 +83,14 @@ struct ClipboardShelfView: View {
                                             .frame(width: 116 * appearance.imageScale, height: 62 * appearance.imageScale).padding(4)
                                             .hangingClipboardCard(id: item.id)
                                             .overlay(alignment: .bottomTrailing) { copiedBadge(item.id) }
+                                            .overlay(alignment: .topTrailing) { pinBadge(item.isPinned) }
                                     }.buttonStyle(.plain).id(item.id)
                                         .help(L10n.tr("点击复制；拖入画布，或右键放入画布"))
                                         .accessibilityLabel(L10n.tr("复制图片"))
                                         .draggable(ClipboardCanvasTransfer(id: item.id, kind: .image))
                                         .contextMenu {
                                             if let onAddToCanvas { Button(L10n.tr("放入当前画布")) { onAddToCanvas(ClipboardCanvasTransfer(id: item.id, kind: .image)) } }
+                                            Button(L10n.tr(item.isPinned ? "取消固定" : "固定")) { withAnimation { history.togglePin(image: item.id) } }
                                             Button(L10n.tr("删除"), role: .destructive) { history.removeImage(item.id) }
                                         }
                                 }
@@ -105,13 +111,16 @@ struct ClipboardShelfView: View {
                                         Text(String(item.text.prefix(500))).font(.system(size: appearance.textSize))
                                             .lineLimit(3).multilineTextAlignment(.leading)
                                             .frame(width: 170 * appearance.textSize / 11, height: 54 * appearance.textSize / 11, alignment: .topLeading).padding(8)
-                                            .hangingClipboardCard(id: item.id)
+                                            .hangingClipboardCard(id: item.id, tint: textTint)
                                             .overlay(alignment: .bottomTrailing) { copiedBadge(item.id) }
+                                            .overlay(alignment: .topTrailing) { pinBadge(item.isPinned) }
                                     }.buttonStyle(.plain).id(item.id)
                                         .help(String(item.text.prefix(2000)))
                                         .draggable(ClipboardCanvasTransfer(id: item.id, kind: .text))
                                         .contextMenu {
                                             if let onAddToCanvas { Button(L10n.tr("放入当前画布")) { onAddToCanvas(ClipboardCanvasTransfer(id: item.id, kind: .text)) } }
+                                            ClipboardTextColorMenu()
+                                            Button(L10n.tr(item.isPinned ? "取消固定" : "固定")) { withAnimation { history.togglePin(text: item.id) } }
                                             Button(L10n.tr("删除"), role: .destructive) { history.removeText(item.id) }
                                         }
                                 }
@@ -173,7 +182,8 @@ struct ClipboardShelfView: View {
                 .lineLimit(3).multilineTextAlignment(.leading)
                 .frame(width: 170 * appearance.textSize / 11, height: 54 * appearance.textSize / 11, alignment: .topLeading)
                 .padding(8)
-                .hangingClipboardCard(id: Self.sampleTextIDs[index])
+                .hangingClipboardCard(id: Self.sampleTextIDs[index], tint: textTint)
+                .contextMenu { ClipboardTextColorMenu() }
                 .help(L10n.tr("仅用于预览，桌面模式显示真实剪贴板内容。"))
         }
     }
@@ -221,12 +231,14 @@ struct ClipboardShelfView: View {
                                     .frame(maxWidth: .infinity).frame(height: 140 * appearance.imageScale).padding(8)
                                     .hangingClipboardCard(id: item.id)
                                     .overlay(alignment: .bottomTrailing) { copiedBadge(item.id) }
+                                            .overlay(alignment: .topTrailing) { pinBadge(item.isPinned) }
                             }.buttonStyle(.plain)
                                 .help(L10n.tr("点击复制；拖入画布，或右键放入画布"))
                                 .accessibilityLabel(L10n.tr("复制图片"))
                                 .draggable(ClipboardCanvasTransfer(id: item.id, kind: .image))
                                         .contextMenu {
                                             if let onAddToCanvas { Button(L10n.tr("放入当前画布")) { onAddToCanvas(ClipboardCanvasTransfer(id: item.id, kind: .image)) } }
+                                            Button(L10n.tr(item.isPinned ? "取消固定" : "固定")) { withAnimation { history.togglePin(image: item.id) } }
                                             Button(L10n.tr("删除"), role: .destructive) { history.removeImage(item.id) }
                                         }
                         }
@@ -244,12 +256,15 @@ struct ClipboardShelfView: View {
                                 Text(String(item.text.prefix(2000))).font(.system(size: appearance.textSize))
                                     .lineLimit(8).multilineTextAlignment(.leading)
                                     .frame(maxWidth: .infinity, alignment: .topLeading).frame(height: 140 * appearance.textSize / 14, alignment: .topLeading).padding(8)
-                                    .hangingClipboardCard(id: item.id)
+                                    .hangingClipboardCard(id: item.id, tint: textTint)
                                     .overlay(alignment: .bottomTrailing) { copiedBadge(item.id) }
+                                            .overlay(alignment: .topTrailing) { pinBadge(item.isPinned) }
                             }.buttonStyle(.plain).help(String(item.text.prefix(2000)))
                                 .draggable(ClipboardCanvasTransfer(id: item.id, kind: .text))
                                         .contextMenu {
                                             if let onAddToCanvas { Button(L10n.tr("放入当前画布")) { onAddToCanvas(ClipboardCanvasTransfer(id: item.id, kind: .text)) } }
+                                            ClipboardTextColorMenu()
+                                            Button(L10n.tr(item.isPinned ? "取消固定" : "固定")) { withAnimation { history.togglePin(text: item.id) } }
                                             Button(L10n.tr("删除"), role: .destructive) { history.removeText(item.id) }
                                         }
                         }
@@ -264,25 +279,31 @@ struct ClipboardShelfView: View {
     private func sectionTitle(_ title: String, count: Int, clear: @escaping () -> Void) -> some View {
         if showsRowControls {
             if canvasClotheslineMode {
-                Menu {
-                    if !showsSamples {
-                        Button(L10n.tr("清空"), role: .destructive, action: clear).disabled(count == 0)
-                        Divider()
-                        Button(L10n.tr(history.isPaused ? "继续记录" : "暂停记录")) { history.isPaused.toggle() }
-                    }
-                    Button(L10n.tr("剪贴板设置")) { sizingCategory = title; showsSizing = true }
-                } label: {
-                    HStack(spacing: 6) {
+                // A borderless menu label renders only one text run, so title and count are concatenated.
+                HStack(spacing: 4) {
+                    Menu {
+                        if !showsSamples {
+                            Button(L10n.tr("清空"), role: .destructive, action: clear).disabled(count == 0)
+                            Divider()
+                            Button(L10n.tr(history.isPaused ? "继续记录" : "暂停记录")) { history.isPaused.toggle() }
+                        }
+                        Button(L10n.tr("剪贴板设置")) { sizingCategory = title; showsSizing = true }
+                    } label: {
                         Text(L10n.tr(title)).fontWeight(.medium)
-                        Text(showsSamples ? L10n.tr("示例") : "\(count)").monospacedDigit().foregroundStyle(.secondary)
-                        Spacer(minLength: 0)
-                        Image(systemName: "ellipsis").foregroundStyle(.secondary)
-                    }.font(.caption)
+                            + Text("  " + (showsSamples ? L10n.tr("示例") : "\(count)")).foregroundColor(.secondary)
+                    }
+                    .font(.caption.monospacedDigit())
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
+                        .opacity(hoveredSection == title ? 1 : 0)
+                        .accessibilityHidden(true)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
+                .onHover { hoveredSection = $0 ? title : (hoveredSection == title ? nil : hoveredSection) }
                 .frame(width: 110, alignment: .leading)
-                .padding(.top, 8)
+                // Vertically centred on the rope (ClipboardClotheslineGeometry.ropeTop plus row padding).
+                .padding(.top, 9)
                 .popover(isPresented: Binding(get: { showsSizing && sizingCategory == title }, set: { showsSizing = $0 })) {
                     sizingControls
                 }
@@ -299,12 +320,25 @@ struct ClipboardShelfView: View {
         Text(L10n.tr(text)).font(.caption).foregroundStyle(.secondary).frame(height: canvasClotheslineMode ? 32 : 70)
     }
 
+    @ViewBuilder private func pinBadge(_ pinned: Bool) -> some View {
+        if pinned {
+            Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(.orange)
+                .rotationEffect(.degrees(30)).padding(6)
+                .transition(.symbolEffect(.drawOn))
+                .accessibilityLabel(L10n.tr("已固定"))
+        }
+    }
+
     @ViewBuilder private func copiedBadge(_ id: UUID) -> some View {
         if copiedID == id {
             Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).padding(4)
+                .transition(.symbolEffect(.drawOn))
                 .accessibilityLabel(L10n.tr("已复制"))
         }
     }
 
-    private func copied(_ id: UUID, success: Bool) { copiedID = success ? id : nil; copyFailed = !success }
+    private func copied(_ id: UUID, success: Bool) {
+        withAnimation { copiedID = success ? id : nil }
+        copyFailed = !success
+    }
 }

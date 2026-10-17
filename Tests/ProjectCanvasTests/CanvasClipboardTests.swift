@@ -199,8 +199,8 @@ final class CanvasClipboardTests: XCTestCase {
             host.layoutSubtreeIfNeeded()
             let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
             host.cacheDisplay(in: host.bounds, to: bitmap)
-            let imagePixel = try XCTUnwrap(bitmap.colorAt(x: 725, y: 175)?.usingColorSpace(.sRGB))
-            let borderPixel = try XCTUnwrap(bitmap.colorAt(x: 630, y: 205)?.usingColorSpace(.sRGB))
+            let imagePixel = try XCTUnwrap(bitmap.color(atPoint: CGPoint(x: 725, y: 175), in: host.bounds)?.usingColorSpace(.sRGB))
+            let borderPixel = try XCTUnwrap(bitmap.color(atPoint: CGPoint(x: 630, y: 205), in: host.bounds)?.usingColorSpace(.sRGB))
             XCTAssertGreaterThan(abs(imagePixel.redComponent - borderPixel.redComponent), 0.04)
             if let path = ProcessInfo.processInfo.environment["PROJECTCANVAS_CONTENT_PREVIEW"] {
                 try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: path))

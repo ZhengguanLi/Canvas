@@ -1,6 +1,6 @@
 # ProjectCanvas
 
-ProjectCanvas is a standalone macOS 14+ app for organizing local project folders on a visual canvas and opening them in your preferred development tools.
+ProjectCanvas is a standalone macOS 26+ app for organizing local project folders on a visual canvas and opening them in your preferred development tools.
 
 ## Projects and opening
 

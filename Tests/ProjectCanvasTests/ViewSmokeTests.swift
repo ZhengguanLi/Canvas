@@ -17,7 +17,7 @@ final class ViewSmokeTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)
-        let pixel = try XCTUnwrap(bitmap.colorAt(x: 50, y: 50)?.usingColorSpace(.sRGB))
+        let pixel = try XCTUnwrap(bitmap.color(atPoint: CGPoint(x: 50, y: 50), in: host.bounds)?.usingColorSpace(.sRGB))
         XCTAssertEqual(pixel.blueComponent, 1, accuracy: 0.03)
         // Color-managed AppKit captures can shift components; the saved tint must still dominate.
         XCTAssertGreaterThan(pixel.blueComponent - max(pixel.redComponent, pixel.greenComponent), 0.5)

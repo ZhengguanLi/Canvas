@@ -32,3 +32,19 @@ struct ClipboardDisplayMenu: View {
         }.help(L10n.tr("剪贴板显示"))
     }
 }
+
+/// Background for clipboard text cards; follows All Cards Background unless a color is chosen.
+struct ClipboardTextColorMenu: View {
+    @ObservedObject private var language = LanguageController.shared
+    @AppStorage(ClipboardAppearance.textColorKey) private var choice = ClipboardAppearance.followCardsColor
+
+    var body: some View {
+        Menu(L10n.tr("剪贴板文字背景")) {
+            Picker(L10n.tr("剪贴板文字背景"), selection: $choice) {
+                Text(L10n.tr("跟随所有卡片背景")).tag(ClipboardAppearance.followCardsColor)
+                Divider()
+                ForEach(CardColor.allCases) { Text($0.title).tag($0.rawValue) }
+            }.pickerStyle(.inline).labelsHidden()
+        }
+    }
+}
