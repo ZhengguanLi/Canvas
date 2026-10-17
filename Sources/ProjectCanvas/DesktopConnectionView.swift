@@ -5,7 +5,15 @@ final class DesktopConnectionView: NSView {
     private var connections: [DesktopSceneLayout.Connection] = []
     private var scale: CGFloat = 1
     private var showsLabels = true
+    private var guides: [CanvasAlignment.Guide] = []
     override var isFlipped: Bool { true }
+
+    /// Alignment guides shown while a desktop card is dragged; empty hides them.
+    func updateGuides(_ guides: [CanvasAlignment.Guide]) {
+        guard self.guides != guides else { return }
+        self.guides = guides
+        needsDisplay = true
+    }
 
     func update(connections: [DesktopSceneLayout.Connection], scale: CGFloat, showsLabels: Bool = true) {
         guard self.connections != connections || self.scale != scale || self.showsLabels != showsLabels else { return }
@@ -16,6 +24,7 @@ final class DesktopConnectionView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        defer { drawGuides() }
         for edge in connections {
             let color = NSColor.controlAccentColor
             color.setStroke()
@@ -51,6 +60,19 @@ final class DesktopConnectionView: NSView {
             NSColor.windowBackgroundColor.withAlphaComponent(0.85).setFill()
             NSBezierPath(roundedRect: textRect.insetBy(dx: -4, dy: -2), xRadius: 4, yRadius: 4).fill()
             text.draw(in: textRect, withAttributes: attributes)
+        }
+    }
+
+    /// Same dashed pink style as the main canvas.
+    private func drawGuides() {
+        NSColor.systemPink.withAlphaComponent(0.9).setStroke()
+        for guide in guides {
+            let line = NSBezierPath()
+            line.move(to: guide.start)
+            line.line(to: guide.end)
+            line.lineWidth = 1
+            line.setLineDash([4, 3], count: 2, phase: 0)
+            line.stroke()
         }
     }
 }

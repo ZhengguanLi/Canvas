@@ -31,9 +31,21 @@ final class DesktopDisplayController {
     private var refreshScheduled = false
     private var cancellables = Set<AnyCancellable>()
 
+    /// Registers the user's shortcut, or none while a new one is being recorded.
+    private func registerToggleHotKey() {
+        hotKey = nil  // Unregister first so re-registering the same combination succeeds.
+        guard !HotKeyStatus.shared.isRecording else { return }
+        let key = GlobalHotKey(shortcut: HotKeyShortcut.load()) { [weak model] in model?.toggleDesktopDisplay() }
+        hotKey = key
+        HotKeyStatus.shared.registrationFailed = !key.isRegistered
+    }
+
     init(model: AppModel) {
         self.model = model
-        hotKey = GlobalHotKey { [weak model] in model?.toggleDesktopDisplay() }
+        registerToggleHotKey()
+        NotificationCenter.default.publisher(for: .projectCanvasHotKeyChanged)
+            .sink { [weak self] _ in self?.registerToggleHotKey() }
+            .store(in: &cancellables)
         // Published values emit before assignment; refresh once after the mutation finishes.
         model.objectWillChange
             .sink { [weak self] in self?.scheduleRefresh() }
@@ -120,6 +132,7 @@ final class DesktopDisplayController {
 
     private func cancelDrag() {
         drag = nil
+        (backgroundPanel?.contentView as? DesktopBackgroundBlurView)?.connections.updateGuides([])
         for panel in panels.values { (panel.contentView as? DesktopProjectCardView)?.cancelInteraction() }
     }
 
@@ -134,10 +147,18 @@ final class DesktopDisplayController {
         guard var current = drag, current.group == group, current.card.id == cardID else {
             cancelDrag(); refresh(); return
         }
-        current.position = current.layout.dragPosition(for: current.card, screenDelta: screenDelta)
+        // Snap to other cards like the main canvas; the threshold is 6 points on screen.
+        let raw = current.layout.dragPosition(for: current.card, screenDelta: screenDelta)
+        let alignment = CanvasAlignment.resolve(
+            cards: group.cards, movingIDs: [cardID],
+            proposed: CGSize(width: raw.x - current.card.x, height: raw.y - current.card.y),
+            zoom: current.layout.scale, enabled: CanvasAlignment.isEnabled, clampsToOrigin: false)
+        current.position = CGPoint(x: current.card.x + alignment.offset.width, y: current.card.y + alignment.offset.height)
         drag = current
+        let connectionView = (backgroundPanel?.contentView as? DesktopBackgroundBlurView)?.connections
         if ended {
             drag = nil
+            connectionView?.updateGuides([])
             model.moveDesktopCard(cardID, to: current.position, in: group.id)
             refresh()
         } else {
@@ -148,9 +169,10 @@ final class DesktopDisplayController {
             }
             let previewLayout = current.layout.updating(cards: preview.cards)
             if let frame = previewLayout.cardFrames[cardID] { panels[cardID]?.setFrame(frame, display: true) }
-            (backgroundPanel?.contentView as? DesktopBackgroundBlurView)?.connections.update(
+            connectionView?.update(
                 connections: previewLayout.connections(in: preview), scale: previewLayout.scale,
                 showsLabels: DesktopAppearance.load().showsLabels)
+            connectionView?.updateGuides(previewLayout.localGuides(alignment.guides))
         }
     }
 

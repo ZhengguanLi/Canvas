@@ -93,6 +93,11 @@ struct DesktopSceneLayout {
         }
     }
 
+    /// Alignment guides from canvas points into the blur panel's flipped coordinates.
+    func localGuides(_ guides: [CanvasAlignment.Guide]) -> [CanvasAlignment.Guide] {
+        guides.map { CanvasAlignment.Guide(start: localPoint($0.start), end: localPoint($0.end)) }
+    }
+
     private func localPoint(_ point: CGPoint) -> CGPoint {
         CGPoint(x: displayLeft - screenFrame.minX + (point.x - canvasOrigin.x) * scale,
                 y: screenFrame.maxY - displayTop + (point.y - canvasOrigin.y) * scale)

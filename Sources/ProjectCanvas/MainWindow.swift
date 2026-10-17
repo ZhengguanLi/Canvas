@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct MainWindow: View {
     @ObservedObject private var language = LanguageController.shared
+    @ObservedObject private var hotKey = HotKeyStatus.shared
     @ObservedObject var model: AppModel
     @AppStorage("clipboardShelfVisible") private var clipboardVisible = true
     @AppStorage("clipboardShelfFullWidth") private var clipboardFullWidth = false
@@ -154,7 +155,7 @@ struct MainWindow: View {
                     Label(L10n.tr("设置"), systemImage: "gearshape").frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .keyboardShortcut(",", modifiers: .command)
-                .help(L10n.tr("数据保存在这台 Mac 上 · ⌘⇧空格 显示桌面卡片"))
+                .help(L10n.format("数据保存在这台 Mac 上 · %@ 显示桌面卡片", hotKey.shortcut.displayString))
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 12)
@@ -173,11 +174,12 @@ struct MainWindow: View {
 
 private struct GroupWorkspace<Clotheslines: View>: View {
     @ObservedObject private var language = LanguageController.shared
+    @ObservedObject private var hotKey = HotKeyStatus.shared
     @ObservedObject var model: AppModel
     let group: ProjectGroup
     let clotheslines: Clotheslines
     @State private var snapToGrid = true
-    @State private var alignsToCards = true
+    @AppStorage(CanvasAlignment.enabledKey) private var alignsToCards = true
     @State private var isConnecting = false
     @State private var zoom = 1.0
     @State private var offset = CGPoint.zero
@@ -192,6 +194,8 @@ private struct GroupWorkspace<Clotheslines: View>: View {
     @State private var loadedViewport = false
     @State private var fitsWindow = false
     @State private var canvasSize = CGSize.zero
+    @AppStorage(CanvasGeometry.cardScaleKey) private var cardScale = 1.0
+    private var cardDisplayScale: Double { CanvasGeometry.clampedCardScale(cardScale) }
     @Namespace private var glassNamespace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pinchStart: Double?
@@ -220,7 +224,7 @@ private struct GroupWorkspace<Clotheslines: View>: View {
                                 .allowsHitTesting(false)
                         }
                         .ignoresSafeArea(edges: .top)
-                    let size = CanvasGeometry.extent(cards: visibleGroup.cards, minimumHeight: 0)
+                    let size = CanvasGeometry.extent(cards: visibleGroup.cards, minimumHeight: 0, cardScale: cardDisplayScale)
                     CanvasScrollView(size: CGSize(width: max(geometry.size.width, size.width * zoom), height: max(geometry.size.height, (size.height + clotheslineHeight) * zoom)), offset: $offset, onViewportCommit: { [zoom] position in
                         fitsWindow = false
                         model.updateViewport(CanvasViewport(zoom: zoom, offsetX: position.x, offsetY: position.y), in: group.id)
@@ -265,14 +269,14 @@ private struct GroupWorkspace<Clotheslines: View>: View {
                     }
                     // Glass elements float directly over the canvas. Shapes in one container blend when
                     // closer than its spacing, so it stays below the gaps to keep each element separate.
-                    let extent = CanvasGeometry.extent(cards: visibleGroup.cards, minimumHeight: 0)
+                    let extent = CanvasGeometry.extent(cards: visibleGroup.cards, minimumHeight: 0, cardScale: cardDisplayScale)
                     let showsMinimap = !visibleGroup.cards.isEmpty &&
                         CanvasMinimap.isUseful(extent: extent, clotheslineHeight: clotheslineHeight, zoom: zoom, viewport: geometry.size)
                     GlassEffectContainer(spacing: 2) {
                     VStack(alignment: .trailing, spacing: 10) {
                         Spacer()
                         if showsMinimap {
-                            CanvasMinimap(cards: visibleGroup.cards, clotheslineHeight: clotheslineHeight, extent: extent,
+                            CanvasMinimap(cards: visibleGroup.cards, clotheslineHeight: clotheslineHeight, extent: extent, cardScale: cardDisplayScale,
                                           zoom: zoom, viewport: geometry.size, offset: Binding(get: { offset }, set: { fitsWindow = false; offset = $0 }))
                                 .glassEffectID("minimap", in: glassNamespace)
                                 .padding(.trailing, 14)
@@ -306,7 +310,7 @@ private struct GroupWorkspace<Clotheslines: View>: View {
                 .dropDestination(for: ClipboardCanvasTransfer.self) { items, location in
                     guard let item = items.first else { return false }
                     let position = CanvasGeometry.positionForDrop(
-                        at: CGPoint(x: location.x - max(0, (geometry.size.width - CanvasGeometry.extent(cards: visibleGroup.cards).width * zoom) / 2),
+                        at: CGPoint(x: location.x - max(0, (geometry.size.width - CanvasGeometry.extent(cards: visibleGroup.cards, cardScale: cardDisplayScale).width * zoom) / 2),
                                     y: location.y - clotheslineHeight * zoom), zoom: zoom, scrollOffset: offset)
                     let added = withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
                         model.addClipboardItem(item, to: group.id, at: position)
@@ -365,7 +369,7 @@ private struct GroupWorkspace<Clotheslines: View>: View {
                 Label(L10n.tr("添加文件夹（⇧⌘O）"), systemImage: "folder.badge.plus")
             }.keyboardShortcut("o", modifiers: [.command, .shift])
             Button { model.toggleDesktopDisplay() } label: {
-                Label(L10n.tr("显示或隐藏桌面卡片（⌘⇧空格）"), systemImage: model.isDesktopDisplayOn ? "rectangle.slash" : "menubar.dock.rectangle")
+                Label(L10n.format("显示或隐藏桌面卡片（%@）", hotKey.shortcut.displayString), systemImage: model.isDesktopDisplayOn ? "rectangle.slash" : "menubar.dock.rectangle")
             }
             backgroundButton
             Button { Task { await model.refreshGitStatuses() } } label: {
@@ -379,6 +383,26 @@ private struct GroupWorkspace<Clotheslines: View>: View {
         }
         ToolbarSpacer(.fixed, placement: .primaryAction)
         ToolbarItem(placement: .primaryAction) { zoomControl }
+        ToolbarSpacer(.fixed, placement: .primaryAction)
+        ToolbarItem(placement: .primaryAction) { cardSizeSlider }
+    }
+
+    /// Draws cards larger without moving them, for crowded canvases. Double-click resets to 100%.
+    private var cardSizeSlider: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "rectangle").font(.system(size: 9))
+            Slider(value: Binding(get: { CanvasGeometry.clampedCardScale(cardScale) }, set: { cardScale = $0 }),
+                   in: CanvasGeometry.cardScaleRange)
+                .controlSize(.small)
+                .frame(width: 90)
+                .onTapGesture(count: 2) { cardScale = 1 }
+            Image(systemName: "rectangle").font(.system(size: 14))
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .help(L10n.format("卡片大小：%d%%（双击恢复 100%%）", Int((CanvasGeometry.clampedCardScale(cardScale) * 100).rounded())))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(L10n.tr("卡片大小"))
     }
 
     private var tagFilterMenu: some View {
@@ -405,6 +429,7 @@ private struct GroupWorkspace<Clotheslines: View>: View {
                 ForEach([0.5, 0.75, 1, 1.5, 2], id: \.self) { level in
                     Button("\(Int(level * 100))%") { fitsWindow = false; zoom = level }
                 }
+
             } label: {
                 Text("\(Int(zoom * 100))%").font(.caption.monospacedDigit())
             }
@@ -514,7 +539,7 @@ private struct GroupWorkspace<Clotheslines: View>: View {
 
     private func fit(in size: CGSize) {
         guard size.width > 0, size.height > 50 else { return }
-        let width = CanvasGeometry.extent(cards: visibleGroup.cards).width
+        let width = CanvasGeometry.extent(cards: visibleGroup.cards, cardScale: cardDisplayScale).width
         let height = clotheslineHeight + max(130, (visibleGroup.cards.map(\.y).max() ?? 0) + 130)
         fitsWindow = true
         zoom = min(1.5, max(0.1, min(size.width / width, (size.height - 50) / height)))

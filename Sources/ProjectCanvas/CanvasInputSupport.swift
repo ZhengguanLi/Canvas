@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Keeps canvas shortcuts local and lets Control-click extend selection on macOS.
+/// Keeps canvas shortcuts local. ⌘- and ⇧-click extend the selection; Control-click keeps its
+/// native meaning and opens the context menu.
 struct CanvasInputSupport: NSViewRepresentable {
     enum Direction { case left, right, up, down }
     enum Key: Equatable { case arrow(Direction), open, duplicate }
@@ -26,11 +27,11 @@ struct CanvasInputSupport: NSViewRepresentable {
     }
 
     static func extendsSelection(_ flags: NSEvent.ModifierFlags) -> Bool {
-        !flags.intersection([.control, .shift]).isEmpty
+        !flags.intersection([.command, .shift]).isEmpty
     }
 
     /// Flags of the click being handled. The global `NSEvent.modifierFlags` reflects key state at
-    /// read time, which can miss a modifier carried only by the (normalized) mouse event.
+    /// read time, which can miss a modifier carried only by the mouse event.
     static var currentEventExtendsSelection: Bool {
         extendsSelection(NSApp.currentEvent?.modifierFlags ?? NSEvent.modifierFlags)
     }
@@ -39,16 +40,6 @@ struct CanvasInputSupport: NSViewRepresentable {
         let flags = event.modifierFlags.intersection([.control, .command, .shift, .option])
         return event.type == .keyDown && event.charactersIgnoringModifiers?.lowercased() == "a" &&
             (flags == .control || flags == .command)
-    }
-
-    static func normalizedMouseEvent(_ event: NSEvent) -> NSEvent? {
-        guard [.leftMouseDown, .leftMouseUp, .leftMouseDragged].contains(event.type),
-              event.modifierFlags.contains(.control) else { return event }
-        // Native Control-click otherwise opens a context menu before SwiftUI sees the tap.
-        return NSEvent.mouseEvent(with: event.type, location: event.locationInWindow,
-            modifierFlags: event.modifierFlags.subtracting(.control).union(.shift), timestamp: event.timestamp,
-            windowNumber: event.windowNumber, context: nil, eventNumber: event.eventNumber,
-            clickCount: event.clickCount, pressure: event.pressure)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -76,7 +67,7 @@ struct CanvasInputSupport: NSViewRepresentable {
         private var monitor: Any?
 
         func start() {
-            monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .leftMouseUp, .leftMouseDragged]) { [weak self] event in
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self, let view = self.view, let window = view.window,
                       event.window === window, !view.isHiddenOrHasHiddenAncestor,
                       window.attachedSheet == nil else { return event }
@@ -86,9 +77,7 @@ struct CanvasInputSupport: NSViewRepresentable {
                     return nil
                 }
                 if let key = CanvasInputSupport.key(for: event), self.onKey?(key) == true { return nil }
-                guard event.type != .keyDown,
-                      view.visibleRect.contains(view.convert(event.locationInWindow, from: nil)) else { return event }
-                return CanvasInputSupport.normalizedMouseEvent(event) ?? event
+                return event
             }
         }
 

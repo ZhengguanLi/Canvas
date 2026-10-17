@@ -8,8 +8,14 @@ final class GlobalHotKey {
     private var handler: EventHandlerRef?
     private let action: () -> Void
     private let identifier: UInt32
+    /// False when macOS rejected the combination, e.g. because another app registered it first.
+    private(set) var isRegistered = false
 
-    init(keyCode: UInt32 = UInt32(kVK_Space), modifiers: UInt32 = UInt32(cmdKey | shiftKey), identifier: UInt32 = 1, action: @escaping () -> Void) {
+    convenience init(shortcut: HotKeyShortcut, identifier: UInt32 = 1, action: @escaping () -> Void) {
+        self.init(keyCode: UInt32(shortcut.keyCode), modifiers: shortcut.carbonModifiers, identifier: identifier, action: action)
+    }
+
+    init(keyCode: UInt32, modifiers: UInt32, identifier: UInt32 = 1, action: @escaping () -> Void) {
         self.action = action
         self.identifier = identifier
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
@@ -29,6 +35,7 @@ final class GlobalHotKey {
         guard handlerStatus == noErr else { return }
         let identifier = EventHotKeyID(signature: 0x50434E56, id: identifier)
         let status = RegisterEventHotKey(keyCode, modifiers, identifier, GetApplicationEventTarget(), 0, &hotKey)
+        isRegistered = status == noErr
         if status != noErr, let handler {
             RemoveEventHandler(handler)
             self.handler = nil

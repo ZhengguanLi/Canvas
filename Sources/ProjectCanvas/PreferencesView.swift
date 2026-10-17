@@ -103,7 +103,8 @@ struct PreferencesView: View {
                     Text(screen.localizedName).tag(DesktopPreferences.identifier(for: screen))
                 }
             }
-            explanation("应用快捷键：⌘⇧空格，显示或隐藏卡片、连线与模糊背景。前置覆盖模式下，成功打开项目后自动收起。Fn-F11 仅执行 macOS 原生“显示桌面”。")
+            ShortcutRecorder()
+            explanation("全局快捷键可显示或隐藏卡片、连线与模糊背景。前置覆盖模式下，成功打开项目后自动收起。Fn-F11 仅执行 macOS 原生“显示桌面”。")
         }
         Section(L10n.tr("桌面外观")) {
             appearanceSlider("模糊背景强度", value: $blur, range: 0...1)

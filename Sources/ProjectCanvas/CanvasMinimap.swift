@@ -6,6 +6,7 @@ struct CanvasMinimap: View {
     let cards: [ProjectCard]
     let clotheslineHeight: Double
     let extent: CGSize
+    var cardScale: Double = 1
     let zoom: Double
     let viewport: CGSize
     @Binding var offset: CGPoint
@@ -27,10 +28,11 @@ struct CanvasMinimap: View {
             Rectangle().fill(Color.secondary.opacity(0.12))
                 .frame(width: size.width, height: clotheslineHeight * scale)
             ForEach(cards) { card in
+                let frame = CanvasGeometry.cardFrame(x: card.x, y: card.y, scale: cardScale)
                 RoundedRectangle(cornerRadius: 1.5)
                     .fill(card.color == .neutral ? Color.secondary.opacity(0.55) : Color(nsColor: card.color.nsColor).opacity(0.8))
-                    .frame(width: CanvasGeometry.cardSize.width * scale, height: CanvasGeometry.cardSize.height * scale)
-                    .offset(x: card.x * scale, y: (clotheslineHeight + card.y) * scale)
+                    .frame(width: frame.width * scale, height: frame.height * scale)
+                    .offset(x: frame.minX * scale, y: (clotheslineHeight + frame.minY) * scale)
             }
             RoundedRectangle(cornerRadius: 2)
                 .strokeBorder(Color.accentColor, lineWidth: 1.5)

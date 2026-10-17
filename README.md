@@ -19,7 +19,7 @@ ProjectCanvas is a standalone macOS 26+ app for organizing local project folders
 - Create named, colored regions from selected cards. Drag a region header to move its cards together; removing a region keeps its cards.
 - Use a card's **Project Details…** action to edit notes, named web links, tags and launch configurations. These details are shared across groups.
 - Tags are comma separated, trimmed and deduplicated without regard to case. Cards display their tags. Use the canvas tag picker to filter projects; connections and regions show only visible members. Locating a project clears the filter so the target is visible. Filtering preserves saved card positions. **⌘K** searches tags as well as names and paths.
-- The main canvas is always editable: click to select, drag to move, or marquee-select several cards. Control/Shift-click or Control/Shift-marquee adds to the selection. Ctrl+A or ⌘A selects all visible cards. With exactly two cards selected, right-click either and choose **Connect to …** to draw a directed connection from that card to the other. Clicking a canvas card selects it; opening projects and copying canvas content use the context menu.
+- The main canvas is always editable: click to select, drag to move, or marquee-select several cards. ⌘/Shift-click or ⌘/Shift-marquee adds to the selection; Control-click opens the context menu as usual. Ctrl+A or ⌘A selects all visible cards. With exactly two cards selected, right-click either and choose **Connect to …** to draw a directed connection from that card to the other. Clicking a canvas card selects it; opening projects and copying canvas content use the context menu.
 - Selected cards and their connections preview movement together; dragging preserves relative spacing. Nearby card edges and center lines show alignment guides and snap within six screen points. Use **Layout → Align to Cards** to toggle this; card alignment takes priority over grid snapping.
 - Choose **Background Color** for a selection, or use a card's context menu. Six choices are available, including the default background. Colors also appear on desktop cards.
 - Use **Layout** to preview a grid or directed relationship layout. A preview does not change saved card positions. **Apply** commits one undoable operation; canceling or closing keeps your manual layout. If the canvas changes while the preview is open, generate a fresh preview. Grid alignment and drag snapping remain available.
@@ -38,9 +38,9 @@ ProjectCanvas is a standalone macOS 26+ app for organizing local project folders
 
 ## Desktop cards
 
-- Toggle desktop cards from the toolbar or use **⌘⇧Space** globally while the app is running.
+- Toggle desktop cards from the toolbar or use **⇧⌘C** globally while the app is running. Change the shortcut in **Settings ▸ Desktop Display**.
 - Desktop cards include directed, labeled connections and a blurred background. Connection visibility follows **Relationships → Show Connections**.
-- **Fn-F11** retains macOS native Show Desktop behavior; the app shortcut is **⌘⇧Space**.
+- **Fn-F11** retains macOS native Show Desktop behavior; the app shortcut defaults to **⇧⌘C**.
 - Settings offer desktop-background and foreground-overlay modes, plus a fixed monitor or the current monitor. A disconnected fixed monitor falls back to the current one.
 - Foreground overlay closes after a project opens successfully or when you switch to another application. A close button also dismisses it.
 - Clicking the blurred background outside the cards (including connections) dismisses the desktop display.
@@ -100,7 +100,7 @@ The clipboard shelf’s expand button uses the full available screen width while
 | Undo / redo | ⌘Z / ⇧⌘Z |
 | Settings | ⌘, |
 | Search all projects | ⌘K |
-| Toggle desktop cards | ⌘⇧Space |
+| Toggle desktop cards | ⇧⌘C (customizable) |
 | Clear selection / cancel connection | Escape |
 | Remove selected canvas items | Delete |
 

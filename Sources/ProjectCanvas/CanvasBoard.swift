@@ -36,7 +36,13 @@ struct CanvasBoard: View {
     @State private var dragOffset: CGSize = .zero
     @State private var alignmentGuides: [CanvasAlignment.Guide] = []
 
-    private var extent: CGSize { CanvasGeometry.extent(cards: group.cards, minimumSize: minimumSize, minimumHeight: minimumHeight) }
+    @AppStorage(CanvasGeometry.cardScaleKey) private var cardScale = 1.0
+    /// Cards are drawn at this scale about their centres; layout positions are unchanged.
+    /// Read-only boards (the layout preview thumbnail) keep true card sizes so the layout stays legible.
+    private var cardDisplayScale: Double {
+        isEditing ? CanvasGeometry.clampedCardScale(cardScale) : 1
+    }
+    private var extent: CGSize { CanvasGeometry.extent(cards: group.cards, minimumSize: minimumSize, minimumHeight: minimumHeight, cardScale: cardDisplayScale) }
     private var related: Set<UUID> {
         guard highlightDirection != 0 else { return [] }
         return selectedCardIDs.union(group.relatedCardIDs(to: selectedCardIDs, upstream: highlightDirection < 0))
@@ -89,7 +95,7 @@ struct CanvasBoard: View {
                     }
                     .onEnded { _ in
                         guard let rect = selectionRect else { return }
-                        let ids = Set(group.cards.filter { rect.intersects(CGRect(origin: CGPoint(x: $0.x, y: $0.y), size: CanvasGeometry.cardSize)) }.map(\.id))
+                        let ids = Set(group.cards.filter { rect.intersects(CanvasGeometry.cardFrame(x: $0.x, y: $0.y, scale: cardDisplayScale)) }.map(\.id))
                         selectedCardIDs = selectionAdds ? selectedCardIDs.union(ids) : ids
                         selectionRect = nil
                         selectedConnectionID = nil
@@ -143,7 +149,7 @@ struct CanvasBoard: View {
                     }
                 }
                         // Selection lifts the card slightly; new cards drop in from above.
-                        .scaleEffect(selectedCardIDs.contains(card.id) && movingIDs.isEmpty ? 1.03 : 1)
+                        .scaleEffect((selectedCardIDs.contains(card.id) && movingIDs.isEmpty ? 1.03 : 1) * cardDisplayScale)
                         .shadow(color: .black.opacity(selectedCardIDs.contains(card.id) ? 0.18 : 0), radius: 10, y: 5)
                         .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.75), value: selectedCardIDs.contains(card.id))
                         .transition(reduceMotion ? .opacity : .asymmetric(
@@ -226,8 +232,8 @@ struct CanvasBoard: View {
                 for edge in group.connections {
                     guard let from = cards[edge.fromCardID], let to = cards[edge.toCardID] else { continue }
                     let a = center(of: from), b = center(of: to)
-                    let start = CanvasGeometry.edgePoint(from: b, to: a)
-                    let end = CanvasGeometry.edgePoint(from: a, to: b)
+                    let start = CanvasGeometry.edgePoint(from: b, to: a, scale: cardDisplayScale)
+                    let end = CanvasGeometry.edgePoint(from: a, to: b, scale: cardDisplayScale)
                     let emphasized = edge.id == selectedConnectionID
                     let active = highlightDirection == 0 || selectedCardIDs.isEmpty || (related.contains(from.id) && related.contains(to.id))
                     let color = emphasized ? Color.orange : Color.accentColor.opacity(active ? 0.58 : 0.08)
@@ -280,10 +286,12 @@ struct CanvasBoard: View {
 
     private func regionBounds(_ region: ProjectRegion) -> (frame: CGRect, header: CGPoint)? {
         let members = group.cards.filter { region.cardIDs.contains($0.id) }
-        guard let minX = members.map({ center(of: $0).x - 105 }).min(),
-              let minY = members.map({ center(of: $0).y - 50 }).min(),
-              let maxX = members.map({ center(of: $0).x + 105 }).max(),
-              let maxY = members.map({ center(of: $0).y + 50 }).max() else { return nil }
+        let halfWidth = CanvasGeometry.cardSize.width / 2 * cardDisplayScale
+        let halfHeight = CanvasGeometry.cardSize.height / 2 * cardDisplayScale
+        guard let minX = members.map({ center(of: $0).x - halfWidth }).min(),
+              let minY = members.map({ center(of: $0).y - halfHeight }).min(),
+              let maxX = members.map({ center(of: $0).x + halfWidth }).max(),
+              let maxY = members.map({ center(of: $0).y + halfHeight }).max() else { return nil }
         return CanvasGeometry.regionPresentation(around: CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY))
     }
 
@@ -363,7 +371,7 @@ struct CanvasBoard: View {
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(firstConnectionCardID == card.id ? Color.orange : selectedCardIDs.contains(card.id) ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: selectedCardIDs.contains(card.id) || firstConnectionCardID == card.id ? 3 : 1))
         .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
         .contentShape(RoundedRectangle(cornerRadius: 12))
-        .help(project.folderPath + "\n" + L10n.tr("拖动移动；Ctrl / ⇧ 点击多选"))
+        .help(project.folderPath + "\n" + L10n.tr("拖动移动；⌘ / ⇧ 点击多选"))
         .accessibilityLabel(card.customName ?? project.folderName)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { handleCardClick(card, extendingSelection: CanvasInputSupport.currentEventExtendsSelection) }
@@ -478,7 +486,8 @@ struct CanvasBoard: View {
         return group.connections.compactMap { edge -> (UUID, CGFloat)? in
             guard let from = cards[edge.fromCardID], let to = cards[edge.toCardID] else { return nil }
             let a = center(of: from), b = center(of: to)
-            let start = CanvasGeometry.edgePoint(from: b, to: a), end = CanvasGeometry.edgePoint(from: a, to: b)
+            let start = CanvasGeometry.edgePoint(from: b, to: a, scale: cardDisplayScale)
+            let end = CanvasGeometry.edgePoint(from: a, to: b, scale: cardDisplayScale)
             let dx = end.x - start.x, dy = end.y - start.y
             let length = max(1, hypot(dx, dy))
             let reciprocal = group.connections.contains { $0.fromCardID == to.id && $0.toCardID == from.id }
