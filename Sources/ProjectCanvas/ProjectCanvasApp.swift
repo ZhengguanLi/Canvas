@@ -17,5 +17,6 @@ struct ProjectCanvasApp: App {
                 .frame(minWidth: 900, minHeight: 600)
         }
         .defaultSize(width: 1280, height: 820)
+        .windowToolbarStyle(.unified)
     }
 }

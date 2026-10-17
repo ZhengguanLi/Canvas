@@ -13,9 +13,10 @@ struct MainWindow: View {
     @State private var confirmsRestore = false
 
     var body: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView {
             sidebar
-            Divider()
+                .navigationSplitViewColumnWidth(min: 210, ideal: 224, max: 280)
+        } detail: {
             VStack(spacing: 0) {
                 if model.needsRecovery {
                     HStack {
@@ -37,7 +38,8 @@ struct MainWindow: View {
                 .background(CanvasBackgroundView())
             }
         }
-        .toolbar { ToolbarItem { ClipboardDisplayMenu() } }
+        .navigationTitle(model.selectedGroup?.name ?? "ProjectCanvas")
+        .toolbar { ToolbarItem(placement: .primaryAction) { ClipboardDisplayMenu() } }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { model.restoreDesktopDisplayIfNeeded(); model.clipboardHistory.start() }
         .task {
@@ -160,8 +162,7 @@ struct MainWindow: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
         }
-        .frame(width: 224)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func exportGroup(_ id: UUID) {
@@ -207,8 +208,6 @@ private struct GroupWorkspace<Clotheslines: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            toolbar
-            editingToolbar
             HStack(spacing: 8) {
                 Image(systemName: "tag").foregroundStyle(.secondary).accessibilityHidden(true)
                 Picker(L10n.tr("标签筛选"), selection: $selectedTag) {
@@ -221,7 +220,9 @@ private struct GroupWorkspace<Clotheslines: View>: View {
                     Button(L10n.tr("清除筛选")) { selectedTag = "" }
                 }
                 Spacer()
-            }.padding(.horizontal, 16).padding(.vertical, 6)
+                Text(selectedCardIDs.isEmpty ? L10n.tr("拖框选择 · Ctrl / ⇧ 追加") : L10n.format("已选 %d 张", selectedCardIDs.count))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }.padding(.horizontal, 16).padding(.vertical, 10)
             GeometryReader { geometry in
                 ZStack {
                     let size = CanvasGeometry.extent(cards: visibleGroup.cards)
@@ -280,9 +281,7 @@ private struct GroupWorkspace<Clotheslines: View>: View {
                         .font(.callout)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(.regularMaterial, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
-                        .shadow(color: .black.opacity(0.08), radius: 10, y: 3)
+                        .modifier(CanvasFloatingControls())
                         .padding(14)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                     }
@@ -305,6 +304,7 @@ private struct GroupWorkspace<Clotheslines: View>: View {
             }
         }
         .background(CanvasBackgroundView())
+        .toolbar { workspaceToolbar }
         .onChange(of: canvasTintColor) { _, _ in refreshDesktopBackground() }
         .onChange(of: canvasTintOpacity) { _, _ in refreshDesktopBackground() }
         .onAppear {
@@ -338,46 +338,78 @@ private struct GroupWorkspace<Clotheslines: View>: View {
         .onDeleteCommand { deleteSelection() }
     }
 
-    private var toolbar: some View {
-        HStack(spacing: 10) {
-            Text(group.name).font(.headline).lineLimit(1)
-            Spacer(minLength: 4)
-            Button { showsBackgroundSettings.toggle() } label: {
-                Label(L10n.tr("画布背景"), systemImage: "paintpalette")
-            }.help(L10n.tr("画布背景"))
-                .popover(isPresented: $showsBackgroundSettings) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text(L10n.tr("画布背景")).font(.headline)
-                        BackgroundTintControls(colorHex: $canvasTintColor, opacity: $canvasTintOpacity)
-                        Text(L10n.tr("颜色和浓度同时应用于内容区与桌面磨砂背景。"))
-                            .font(.caption).foregroundStyle(.secondary)
-                        HStack {
-                            Button(L10n.tr("恢复默认外观")) {
-                                canvasTintColor = BackgroundTintColor.default.hex; canvasTintOpacity = 0
-                            }
-                            Spacer()
-                            Button(L10n.tr("完成")) { showsBackgroundSettings = false }
-                        }
-                    }.padding(18).frame(width: 360)
+    @ToolbarContentBuilder
+    private var workspaceToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button(action: chooseFolders) {
+                Label(L10n.tr("添加文件夹（⇧⌘O）"), systemImage: "folder.badge.plus")
+            }.keyboardShortcut("o", modifiers: [.command, .shift])
+            Button { model.toggleDesktopDisplay() } label: {
+                Label(L10n.tr("显示或隐藏桌面卡片（⌘⇧空格）"), systemImage: model.isDesktopDisplayOn ? "rectangle.slash" : "menubar.dock.rectangle")
+            }
+            backgroundButton
+            Button { Task { await model.refreshGitStatuses() } } label: {
+                Label(L10n.tr("刷新 Git 状态"), systemImage: "arrow.clockwise")
+            }.disabled(model.isRefreshingGit)
+        }
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+        ToolbarItemGroup(placement: .primaryAction) {
+            editingMenu
+            Button(action: deleteSelection) {
+                Label(L10n.tr("删除选中项"), systemImage: "trash")
+            }.disabled(selectedCardIDs.isEmpty && selectedConnectionID == nil)
+            Button { model.undo() } label: {
+                Label(L10n.tr("撤销"), systemImage: "arrow.uturn.backward")
+            }.keyboardShortcut("z", modifiers: .command).disabled(!model.canUndo)
+            Button { model.redo() } label: {
+                Label(L10n.tr("重做"), systemImage: "arrow.uturn.forward")
+            }.keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!model.canRedo)
+        }
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button { fitsWindow = false; zoom = max(0.1, zoom - 0.1) } label: {
+                Label(L10n.tr("缩小"), systemImage: "minus.magnifyingglass")
+            }
+            Text("\(Int(zoom * 100))%")
+                .font(.caption.monospacedDigit()).frame(width: 38)
+                .accessibilityLabel(L10n.tr("缩放比例"))
+            Button { fitsWindow = false; zoom = min(2, zoom + 0.1) } label: {
+                Label(L10n.tr("放大"), systemImage: "plus.magnifyingglass")
+            }
+        }
+    }
+
+    private var backgroundButton: some View {
+        Button { showsBackgroundSettings.toggle() } label: {
+            Label(L10n.tr("画布背景"), systemImage: "paintpalette")
+        }
+        .popover(isPresented: $showsBackgroundSettings) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(L10n.tr("画布背景")).font(.headline)
+                BackgroundTintControls(colorHex: $canvasTintColor, opacity: $canvasTintOpacity)
+                Text(L10n.tr("颜色和浓度同时应用于内容区与桌面磨砂背景。"))
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button(L10n.tr("恢复默认外观")) {
+                        canvasTintColor = BackgroundTintColor.default.hex; canvasTintOpacity = 0
+                    }
+                    Spacer()
+                    Button(L10n.tr("完成")) { showsBackgroundSettings = false }
                 }
-            Button(action: chooseFolders) { Image(systemName: "folder.badge.plus") }.help(L10n.tr("添加文件夹（⇧⌘O）")).keyboardShortcut("o", modifiers: [.command, .shift])
-            Button { model.toggleDesktopDisplay() } label: { Image(systemName: model.isDesktopDisplayOn ? "rectangle.slash" : "menubar.dock.rectangle") }.help(L10n.tr("显示或隐藏桌面卡片（⌘⇧空格）"))
-            Button { Task { await model.refreshGitStatuses() } } label: { Image(systemName: "arrow.clockwise") }.disabled(model.isRefreshingGit).help(L10n.tr("刷新 Git 状态"))
-            Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }.keyboardShortcut("z", modifiers: .command).disabled(!model.canUndo).help(L10n.tr("撤销"))
-            Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }.keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!model.canRedo).help(L10n.tr("重做"))
-            Divider().frame(height: 20)
-            Button { fitsWindow = false; zoom = max(0.1, zoom - 0.1) } label: { Image(systemName: "minus.magnifyingglass") }
-            Text("\(Int(zoom * 100))%").font(.caption.monospacedDigit()).frame(width: 38)
-            Button { fitsWindow = false; zoom = min(2, zoom + 0.1) } label: { Image(systemName: "plus.magnifyingglass") }
-        }.controlSize(.small).padding(.horizontal, 14).frame(height: 50)
+            }.padding(18).frame(width: 360)
+        }
     }
 
     private func refreshDesktopBackground() {
         NotificationCenter.default.post(name: Notification.Name("ProjectCanvasDesktopPreferencesChanged"), object: nil)
     }
 
-    private var editingToolbar: some View {
-        HStack(spacing: 10) {
+    private var editingMenu: some View {
+        Menu {
             Menu(L10n.tr("布局")) {
                 Button(L10n.tr("网格布局预览…")) { model.autoLayoutCards(in: group.id) }
                 Button(L10n.tr("关系布局预览…")) { model.layoutPreview = model.makeLayoutPreview(in: group.id, mode: .relationships) }
@@ -401,13 +433,10 @@ private struct GroupWorkspace<Clotheslines: View>: View {
             if let id = selectedConnectionID, let edge = group.connections.first(where: { $0.id == id }) {
                 Button(L10n.tr("连线属性")) { connectionToConfigure = edge }
             }
-            Spacer(minLength: 0)
-            Text(selectedCardIDs.isEmpty ? L10n.tr("拖框选择 · Ctrl / ⇧ 追加") : L10n.format("已选 %d 张", selectedCardIDs.count)).font(.caption).foregroundStyle(.secondary)
-            Button(action: deleteSelection) { Image(systemName: "trash") }.disabled(selectedCardIDs.isEmpty && selectedConnectionID == nil).help(L10n.tr("删除选中项"))
+        } label: {
+            Label(L10n.tr("编辑"), systemImage: "slider.horizontal.3")
         }
-        .controlSize(.small)
-        .padding(.horizontal, 14)
-        .frame(height: 40)
+        .help(L10n.tr("编辑"))
     }
 
     private func locateRequestedCard() {
