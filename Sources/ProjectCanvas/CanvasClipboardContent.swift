@@ -18,8 +18,8 @@ enum CanvasClipboardContent: Codable, Equatable {
 
     var previewImage: CGImage? {
         guard case .image(_, _, let preview) = self,
-              let source = CGImageSourceCreateWithData(preview as CFData, nil) else { return nil }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+              !preview.isEmpty else { return nil }
+        return CanvasPreviewCache.shared.image(for: preview)
     }
 
     var byteCount: Int {
@@ -94,4 +94,29 @@ struct CanvasClipboardTile: View {
 
 extension CanvasClipboardContent {
     var isText: Bool { if case .text = self { return true }; return false }
+}
+
+/// Thread-safe cache with bounded decoded-memory cost. Large imported previews are downsampled.
+final class CanvasPreviewCache {
+    static let shared = CanvasPreviewCache()
+    private let cache = NSCache<NSData, CGImage>()
+
+    init() {
+        cache.totalCostLimit = 32 * 1024 * 1024
+        cache.countLimit = 256
+    }
+
+    func image(for data: Data) -> CGImage? {
+        let key = data as NSData
+        if let image = cache.object(forKey: key) { return image }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 512,
+                kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary) else { return nil }
+        cache.setObject(image, forKey: key, cost: image.bytesPerRow * image.height + data.count)
+        return image
+    }
 }

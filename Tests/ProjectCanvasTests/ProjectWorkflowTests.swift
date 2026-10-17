@@ -8,6 +8,7 @@ final class ProjectWorkflowTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("canvas.json")
         let model = AppModel(storageURL: url)
+        defer { model.flushPersistence() }
         model.addProject(folderURL: dir)
         let project = try XCTUnwrap(model.projects.first)
         let group = try XCTUnwrap(model.selectedGroup)
@@ -20,6 +21,7 @@ final class ProjectWorkflowTests: XCTestCase {
         model.addGroup()
         model.addProject(folderURL: dir)
         XCTAssertEqual(model.searchProjects("backend").count, 2)
+        model.flushPersistence()
         XCTAssertEqual(AppModel(storageURL: url).projects[0].tags, ["API", "Backend"])
     }
 
@@ -29,6 +31,7 @@ final class ProjectWorkflowTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("canvas.json")
         let model = AppModel(storageURL: url)
+        defer { model.flushPersistence() }
         model.addProject(folderURL: dir)
         let id = try XCTUnwrap(model.projects.first?.id)
         model.recordProjectOpened(id, at: Date(timeIntervalSince1970: 100))
@@ -39,6 +42,7 @@ final class ProjectWorkflowTests: XCTestCase {
         XCTAssertEqual(model.frequentProjects.first?.project.openCount, 2)
         model.undo()
         XCTAssertEqual(model.projects.first?.openCount, 2)
+        model.flushPersistence()
         XCTAssertEqual(AppModel(storageURL: url).recentProjects.first?.project.lastOpenedAt, Date(timeIntervalSince1970: 200))
         model.recordProjectOpened(UUID())
         XCTAssertEqual(model.projects.count, 1)
@@ -100,14 +104,17 @@ final class ProjectWorkflowTests: XCTestCase {
         for folder in folders { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
         let url = dir.appendingPathComponent("canvas.json")
         let model = AppModel(storageURL: url)
+        defer { model.flushPersistence() }
         model.addProjects(folderURLs: folders, to: try XCTUnwrap(model.selectedGroupID))
         let first = model.projects[0].id, second = model.projects[1].id
+        model.flushPersistence()
         let backup = try Data(contentsOf: url.appendingPathExtension("backup1"))
         model.recordProjectOpened(first, at: Date(timeIntervalSince1970: 100))
         model.recordProjectOpened(first, at: Date(timeIntervalSince1970: 200))
         model.recordProjectOpened(second, at: Date(timeIntervalSince1970: 300))
         XCTAssertEqual(model.recentProjects.map(\.project.id), [second, first])
         XCTAssertEqual(model.frequentProjects.map(\.project.id), [first, second])
+        model.flushPersistence()
         XCTAssertEqual(try Data(contentsOf: url.appendingPathExtension("backup1")), backup)
     }
 
@@ -116,6 +123,7 @@ final class ProjectWorkflowTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let model = AppModel(storageURL: dir.appendingPathComponent("canvas.json"))
+        defer { model.flushPersistence() }
         let secondFolder = dir.appendingPathComponent("Two")
         try FileManager.default.createDirectory(at: secondFolder, withIntermediateDirectories: true)
         model.addProjects(folderURLs: [dir, secondFolder], to: try XCTUnwrap(model.selectedGroupID))
@@ -137,6 +145,7 @@ final class ProjectWorkflowTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let model = AppModel(storageURL: dir.appendingPathComponent("source.json"))
+        defer { model.flushPersistence() }
         model.addProject(folderURL: dir)
         let id = try XCTUnwrap(model.projects.first?.id)
         let config = LaunchConfiguration(name: "Dev", command: "echo ok", workingDirectory: "sub", environment: ["MODE": "dev"])
@@ -146,6 +155,7 @@ final class ProjectWorkflowTests: XCTestCase {
         XCTAssertEqual(model.projects, saved)
         let exported = dir.appendingPathComponent("export.json")
         model.exportGroup(try XCTUnwrap(model.selectedGroupID), to: exported)
+        model.flushPersistence()
         let imported = AppModel(storageURL: dir.appendingPathComponent("target.json"))
         imported.importGroups(from: exported, pathFrom: "", pathTo: "")
         XCTAssertEqual(imported.projects.first?.tags, ["API"])
@@ -162,6 +172,7 @@ final class ProjectWorkflowTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let model = AppModel(storageURL: dir.appendingPathComponent("canvas.json"))
+        defer { model.flushPersistence() }
         let folder = dir.appendingPathComponent("missing")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         model.addProject(folderURL: folder)

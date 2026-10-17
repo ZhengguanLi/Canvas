@@ -9,7 +9,7 @@ ProjectCanvas is a standalone macOS 14+ app for organizing local project folders
 - In the main window, click a card to select it and drag to move it. Right-click for **Open Project**, **Open With**, **Show in Finder**, **Copy Path**, **Relocate Folder**, and **Card Background**. Desktop cards still open projects when clicked.
 - Set a default application in **Settings**: VS Code, Cursor, IntelliJ IDEA, Finder, or Terminal. Each project can override it.
 - VS Code and Cursor support new/reused windows. IntelliJ and Terminal use their own window preferences.
-- Cards display Git branch, changed-file count, and linked-worktree status. Status refreshes in the background on activation, approximately every minute, or with the refresh button. Git must be available through `/usr/bin/git`.
+- Cards display Git branch, changed-file count, and linked-worktree status. Status refreshes in the background on activation, approximately every minute, or with the refresh button. Git must be available through `/usr/bin/git`. Up to three repositories refresh concurrently; each Git command has a 15-second timeout.
 
 ## Canvas and relationships
 
@@ -82,6 +82,7 @@ Data is saved at `~/Library/Application Support/ProjectCanvas/canvas.json`.
 
 - Legacy canvas files remain readable. Schema versions and card/connection references are validated.
 - Invalid or unreadable files are preserved, and saving pauses until recovery. The recovery banner offers backup restoration or JSON import.
+- Encoding, validation and writes run on a serial background queue. Viewport updates are coalesced after 300 ms; normal app termination flushes pending writes. Recovery operations wait for earlier writes and discard pending viewport changes.
 - The five most recent changed, valid pre-edit snapshots are retained as `canvas.json.backup1` through `canvas.json.backup5`. Scrolling, zooming, and group selection do not rotate these backups.
 - Restoring a backup or importing during recovery preserves the previous file as `canvas.json.preserved-<UUID>`.
 - **Import, Export and Recovery** exports the selected group or imports groups into the current collection. Import generates fresh group/card/connection IDs and reuses projects with the same path.

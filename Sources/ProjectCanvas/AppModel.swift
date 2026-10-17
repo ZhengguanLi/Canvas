@@ -27,6 +27,8 @@ final class AppModel: ObservableObject {
     private var editingCardID: UUID?
     private let preferences: UserDefaults
     private let storage: CanvasStorage
+    private let persistence: CanvasPersistence
+    private var terminationObserver: NSObjectProtocol?
     private var restoring = false
     private(set) var desktopDisplayController: DesktopDisplayController?
     private var undoStack: [ProjectCanvasData] = []
@@ -39,6 +41,7 @@ final class AppModel: ObservableObject {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("ProjectCanvas", isDirectory: true)
         storage = CanvasStorage(url: storageURL ?? appSupport.appendingPathComponent("canvas.json"))
+        persistence = CanvasPersistence(storage: storage)
         let saved: ProjectCanvasData
         var loadError: Error?
         do { saved = try storage.load() ?? .empty }
@@ -49,7 +52,22 @@ final class AppModel: ObservableObject {
         defaultEditor = saved.defaultEditor ?? .vscode
         defaultOpenInNewWindow = saved.defaultOpenInNewWindow ?? false
         needsRecovery = storage.requiresRecovery
+        persistence.onFailure = { [weak self] error, recovery, id in
+            Task { @MainActor [weak self] in
+                guard let self, self.persistence.isCurrentFailure(id) else { return }
+                self.needsRecovery = recovery
+                self.alertMessage = L10n.format("保存失败：%@", error.localizedDescription)
+            }
+        }
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: nil
+        ) { [persistence] _ in persistence.flush() }
         if let loadError { alertMessage = L10n.format("加载失败，原文件已保留，已暂停保存：%@", loadError.localizedDescription) }
+    }
+
+    deinit {
+        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
+        persistence.flush()
     }
 
     var selectedGroup: ProjectGroup? {
@@ -530,9 +548,15 @@ final class AppModel: ObservableObject {
 
     private func persist(rotatingBackup: Bool = true) {
         guard !restoring else { return }
-        do { try storage.save(currentSnapshot, rotatingBackup: rotatingBackup); needsRecovery = false }
-        catch { needsRecovery = storage.requiresRecovery; alertMessage = L10n.format("保存失败：%@", error.localizedDescription) }
+        guard !needsRecovery else {
+            alertMessage = CanvasStorage.StorageError.recoveryRequired.localizedDescription
+            return
+        }
+        persistence.save(currentSnapshot, rotatingBackup: rotatingBackup)
     }
+
+    /// Used at normal application termination and as a deterministic persistence barrier.
+    func flushPersistence() { persistence.flush() }
 
     private var currentSnapshot: ProjectCanvasData {
         var data = ProjectCanvasData(projects: projects, groups: groups, selectedGroupID: selectedGroupID)
@@ -569,7 +593,7 @@ final class AppModel: ObservableObject {
     func updateViewport(_ viewport: CanvasViewport, in groupID: UUID) {
         guard let index = groups.firstIndex(where: { $0.id == groupID }), groups[index].viewport != viewport else { return }
         groups[index].viewport = viewport
-        persist(rotatingBackup: false)
+        if !needsRecovery { persistence.scheduleViewport(currentSnapshot) }
     }
 
     func relocateProject(_ id: UUID, to url: URL) {
@@ -593,11 +617,21 @@ final class AppModel: ObservableObject {
         guard !isRefreshingGit else { return }
         isRefreshingGit = true
         defer { isRefreshingGit = false }
-        let snapshot = projects
-        let statuses = await Task.detached(priority: .utility) {
-            snapshot.map { ($0.id, $0.folderPath, GitStatus.read(at: $0.folderURL)) }
-        }.value
-        for (id, path, status) in statuses where projects.contains(where: { $0.id == id && $0.folderPath == path }) { gitStatuses[id] = status }
+        let snapshot = projects.map { ($0.id, $0.folderPath) }
+        await withTaskGroup(of: (UUID, String, GitStatus).self) { tasks in
+            var remaining = snapshot.makeIterator()
+            func enqueue(_ project: (UUID, String)) {
+                tasks.addTask(priority: .utility) {
+                    let status = GitStatus.read(at: URL(fileURLWithPath: project.1))
+                    return (project.0, project.1, status)
+                }
+            }
+            for _ in 0..<3 { if let project = remaining.next() { enqueue(project) } }
+            while let (id, path, status) = await tasks.next() {
+                if projects.contains(where: { $0.id == id && $0.folderPath == path }) { gitStatuses[id] = status }
+                if !Task.isCancelled, let project = remaining.next() { enqueue(project) }
+            }
+        }
     }
 
     func exportGroup(_ id: UUID, to url: URL) {
@@ -651,7 +685,7 @@ final class AppModel: ObservableObject {
                 selectedGroupID = group.id
             }
             restoring = false
-            if needsRecovery { try storage.replacePreservingOriginal(currentSnapshot); needsRecovery = false }
+            if needsRecovery { try persistence.replacePreservingOriginal(currentSnapshot); needsRecovery = false }
             else { persist() }
             Task { await refreshGitStatuses() }
         } catch { restoring = false; alertMessage = L10n.format("导入失败：%@", error.localizedDescription) }
@@ -659,10 +693,10 @@ final class AppModel: ObservableObject {
 
     func restoreBackup() {
         do {
-            let data = try storage.restoreBackup()
+            let data = try persistence.restoreBackup()
             undoStack.removeAll(); redoStack.removeAll()
-            restore(data)
             needsRecovery = false
+            restore(data)
             Task { await refreshGitStatuses() }
         } catch { alertMessage = L10n.format("恢复失败：%@", error.localizedDescription) }
     }

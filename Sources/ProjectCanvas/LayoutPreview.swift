@@ -24,20 +24,42 @@ enum ProjectLayout {
             for edge in group.connections where ids.contains(edge.fromCardID) && ids.contains(edge.toCardID) {
                 edges[edge.fromCardID, default: []].insert(edge.toCardID)
             }
-            // Iterative reachability avoids recursion limits and identifies strongly connected components.
-            var reachable: [UUID: Set<UUID>] = [:]
-            for id in ordered {
-                var seen: Set<UUID> = [id], pending = [id]
-                while let next = pending.popLast() {
-                    for destination in edges[next] ?? [] where seen.insert(destination).inserted { pending.append(destination) }
+            // Iterative Kosaraju: linear graph traversal, without recursive stack growth.
+            var reverse: [UUID: [UUID]] = [:]
+            for (source, destinations) in edges {
+                for destination in destinations { reverse[destination, default: []].append(source) }
+            }
+            var seen = Set<UUID>(), finished: [UUID] = []
+            for id in ordered where !seen.contains(id) {
+                var stack: [(UUID, Bool)] = [(id, false)]
+                while let (node, exiting) = stack.popLast() {
+                    if exiting { finished.append(node); continue }
+                    guard seen.insert(node).inserted else { continue }
+                    stack.append((node, true))
+                    for next in edges[node] ?? [] where !seen.contains(next) { stack.append((next, false)) }
                 }
-                reachable[id] = seen
+            }
+            var rawComponent: [UUID: Int] = [:]
+            var componentCount = 0
+            for id in finished.reversed() where rawComponent[id] == nil {
+                var stack = [id]
+                rawComponent[id] = componentCount
+                while let node = stack.popLast() {
+                    for next in reverse[node] ?? [] where rawComponent[next] == nil {
+                        rawComponent[next] = componentCount
+                        stack.append(next)
+                    }
+                }
+                componentCount += 1
             }
             var components: [[UUID]] = [], componentOf: [UUID: Int] = [:]
-            for id in ordered where componentOf[id] == nil {
-                let members = ordered.filter { reachable[id]!.contains($0) && reachable[$0]!.contains(id) }
-                for member in members { componentOf[member] = components.count }
-                components.append(members)
+            var canonical: [Int: Int] = [:]
+            for id in ordered {
+                let raw = rawComponent[id]!
+                if canonical[raw] == nil { canonical[raw] = components.count; components.append([]) }
+                let index = canonical[raw]!
+                components[index].append(id)
+                componentOf[id] = index
             }
             var successors = Array(repeating: Set<Int>(), count: components.count)
             var indegree = Array(repeating: 0, count: components.count)
@@ -47,12 +69,14 @@ enum ProjectLayout {
             }
             var layers = Array(repeating: 0, count: components.count)
             var pending = indegree.indices.filter { indegree[$0] == 0 }
-            while !pending.isEmpty {
-                let current = pending.removeFirst()
+            var head = 0
+            while head < pending.count {
+                let current = pending[head]
+                head += 1
                 for next in successors[current].sorted() {
                     layers[next] = max(layers[next], layers[current] + 1)
                     indegree[next] -= 1
-                    if indegree[next] == 0 { pending.append(next); pending.sort() }
+                    if indegree[next] == 0 { pending.append(next) }
                 }
             }
             var rows: [Int: Int] = [:]

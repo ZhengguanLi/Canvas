@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Darwin
 
 /// Launches a directory without interpolating its path into shell code.
 enum ProjectLauncher {
@@ -118,9 +119,12 @@ enum ProjectLauncher {
     }
 }
 
-/// Drains stdout while the child runs so verbose commands cannot block on a full pipe.
+/// Drains output without blocking on inherited pipe handles; bounds execution and captured output.
 enum ProcessRunner {
-    static func run(executable: String, arguments: [String], directory: URL? = nil) throws -> (status: Int32, output: String) {
+    enum RunError: Error { case timedOut, cancelled, outputLimitExceeded }
+
+    static func run(executable: String, arguments: [String], directory: URL? = nil,
+                    timeout: TimeInterval = 15) throws -> (status: Int32, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -131,9 +135,53 @@ enum ProcessRunner {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
+        let descriptor = pipe.fileHandleForReading.fileDescriptor
+        _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL) | O_NONBLOCK)
+        defer {
+            try? pipe.fileHandleForReading.close()
+            try? pipe.fileHandleForWriting.close()
+        }
         try process.run()
-        let bytes = pipe.fileHandleForReading.readDataToEndOfFile()
+        // The parent must not keep the write end alive.
+        try? pipe.fileHandleForWriting.close()
+        var output = Data()
+        var exceededOutputLimit = false
+        var exceededDeadline = false
+        var buffer = [UInt8](repeating: 0, count: 16_384)
+        let duration = max(0, min(timeout, 3600))
+        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(duration * 1_000_000_000)
+        func drain() {
+            while true {
+                let count = buffer.withUnsafeMutableBytes { Darwin.read(descriptor, $0.baseAddress, $0.count) }
+                guard count > 0 else { return }
+                let retained = min(count, max(0, 4 * 1024 * 1024 - output.count))
+                output.append(contentsOf: buffer.prefix(retained))
+                if retained < count { exceededOutputLimit = true; return }
+                // Return to the deadline check even if a child writes continuously.
+                if count < buffer.count { return }
+                if DispatchTime.now().uptimeNanoseconds >= deadline { exceededDeadline = true; return }
+                if Task.isCancelled { return }
+            }
+        }
+        var failure: RunError?
+        while process.isRunning {
+            drain()
+            if exceededOutputLimit { failure = .outputLimitExceeded; break }
+            if Task.isCancelled { failure = .cancelled; break }
+            if DispatchTime.now().uptimeNanoseconds >= deadline { failure = .timedOut; break }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        if let failure {
+            // SIGKILL also handles children that ignore SIGTERM.
+            if process.isRunning { Darwin.kill(process.processIdentifier, SIGKILL) }
+            process.waitUntilExit()
+            throw failure
+        }
+        drain()
+        if exceededOutputLimit { throw RunError.outputLimitExceeded }
+        if exceededDeadline { throw RunError.timedOut }
+        if Task.isCancelled { throw RunError.cancelled }
         process.waitUntilExit()
-        return (process.terminationStatus, String(decoding: bytes, as: UTF8.self))
+        return (process.terminationStatus, String(decoding: output, as: UTF8.self))
     }
 }

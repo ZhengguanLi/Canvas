@@ -16,9 +16,12 @@ final class WorkbenchTests: XCTestCase {
         let (url, data) = try fixture(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         try CanvasStorage(url: url).save(data)
         let model = AppModel(storageURL: url)
+        defer { model.flushPersistence() }
+        model.flushPersistence()
         let before = try Data(contentsOf: url)
         let preview = try XCTUnwrap(model.makeLayoutPreview(in: data.groups[0].id, mode: .relationships))
         XCTAssertEqual(model.groups, data.groups)
+        model.flushPersistence()
         XCTAssertEqual(try Data(contentsOf: url), before)
         XCTAssertFalse(model.canUndo)
         XCTAssertEqual(preview.proposed.cards, model.makeLayoutPreview(in: data.groups[0].id, mode: .relationships)?.proposed.cards)
@@ -37,6 +40,7 @@ final class WorkbenchTests: XCTestCase {
         let (url, data) = try fixture(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         try CanvasStorage(url: url).save(data)
         let model = AppModel(storageURL: url), group = data.groups[0]
+        defer { model.flushPersistence() }
         let members = Set(group.cards.prefix(2).map(\.id))
         model.addRegion(name: "Backend", color: .blue, cardIDs: members, in: group.id)
         let region = try XCTUnwrap(model.selectedGroup?.regions.first)
@@ -68,10 +72,13 @@ final class WorkbenchTests: XCTestCase {
         initial.groups.append(second)
         try CanvasStorage(url: url).save(initial)
         let model = AppModel(storageURL: url), group = initial.groups[0]
+        defer { model.flushPersistence() }
         model.autoLayoutCards(in: group.id)
+        model.flushPersistence()
         let before = try Data(contentsOf: url)
         XCTAssertNotNil(model.layoutPreview)
         model.layoutPreview = nil
+        model.flushPersistence()
         XCTAssertEqual(try Data(contentsOf: url), before)
         XCTAssertFalse(model.canUndo)
         XCTAssertEqual(model.searchProjects("Special Alias").count, 3)
@@ -89,6 +96,7 @@ final class WorkbenchTests: XCTestCase {
         model.undo(); XCTAssertEqual(model.groups[0].regions.first?.name, "Old")
         model.removeCard(group.cards[0].id, from: group.id)
         XCTAssertTrue(model.groups[0].regions.isEmpty)
+        model.flushPersistence()
         XCTAssertNoThrow(try CanvasStorage(url: url).load())
         model.undo(); XCTAssertEqual(model.groups[0].regions.first, region)
     }

@@ -13,6 +13,7 @@ final class DesktopDragTests: XCTestCase {
         defer { preferences.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("canvas.json")
         let model = AppModel(storageURL: url, preferences: preferences)
+        defer { model.flushPersistence() }
         model.addProject(folderURL: directory)
         model.toggleDesktopDisplay()
         defer { if model.isDesktopDisplayOn { model.toggleDesktopDisplay() } }
@@ -22,12 +23,15 @@ final class DesktopDragTests: XCTestCase {
         let card = try XCTUnwrap(group.cards.first)
         let panel = try XCTUnwrap(NSApp.windows.first { $0.isVisible && $0.contentView is DesktopProjectCardView })
         let originalFrame = panel.frame
+        model.flushPersistence()
         let before = try Data(contentsOf: url)
         controller.updateDrag(cardID: card.id, screenDelta: CGSize(width: 30, height: -20), ended: false)
+        model.flushPersistence()
         XCTAssertEqual(try Data(contentsOf: url), before)
         controller.handleEscape()
         XCTAssertTrue(model.isDesktopDisplayOn)
         XCTAssertEqual(model.selectedGroup?.cards, group.cards)
+        model.flushPersistence()
         XCTAssertEqual(try Data(contentsOf: url), before)
         controller.updateDrag(cardID: card.id, screenDelta: CGSize(width: 30, height: -20), ended: false)
         controller.updateDrag(cardID: card.id, screenDelta: CGSize(width: 30, height: -20), ended: true)
@@ -36,6 +40,7 @@ final class DesktopDragTests: XCTestCase {
         XCTAssertEqual(panel.frame.minY - originalFrame.minY, -20, accuracy: 0.01)
         XCTAssertGreaterThan(changed.x, card.x)
         XCTAssertGreaterThan(changed.y, card.y)
+        model.flushPersistence()
         XCTAssertEqual(AppModel(storageURL: url, preferences: preferences).selectedGroup?.cards.first, changed)
         model.undo()
         XCTAssertEqual(model.selectedGroup?.cards, group.cards)
@@ -54,6 +59,7 @@ final class DesktopDragTests: XCTestCase {
         defer { preferences.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("canvas.json")
         let model = AppModel(storageURL: url, preferences: preferences)
+        defer { model.flushPersistence() }
         model.addProject(folderURL: directory)
         model.addProject(folderURL: secondDirectory)
         let groupID = try XCTUnwrap(model.selectedGroupID)
@@ -83,6 +89,7 @@ final class DesktopDragTests: XCTestCase {
         XCTAssertEqual(moving.frame.minX, movingFrame.minX - distance, accuracy: 0.001)
         XCTAssertEqual(stationary.frame, stationaryFrame)
         XCTAssertTrue(movedGroup.cards.allSatisfy { $0.x >= 20 && $0.y >= 20 })
+        model.flushPersistence()
         XCTAssertEqual(AppModel(storageURL: url, preferences: preferences).selectedGroup, movedGroup)
         model.undo()
         try await Task.sleep(for: .milliseconds(100))

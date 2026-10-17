@@ -12,6 +12,7 @@ final class IntegrationTests: XCTestCase {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let model = AppModel(storageURL: directory.appendingPathComponent("canvas.json"))
+        defer { model.flushPersistence() }
         let old = directory.appendingPathComponent("old")
         let oldish = directory.appendingPathComponent("oldish")
         try FileManager.default.createDirectory(at: old.appendingPathComponent("one"), withIntermediateDirectories: true)
@@ -47,12 +48,14 @@ final class IntegrationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("canvas.json")
         let model = AppModel(storageURL: url)
+        defer { model.flushPersistence() }
         model.addProject(folderURL: directory)
         let group = try XCTUnwrap(model.selectedGroup)
         model.setCardColor(.green, ids: [group.cards[0].id], in: group.id)
         model.setProjectOpening(model.projects[0].id, editor: .cursor, newWindow: true)
         model.defaultEditor = .intellij
         model.updateViewport(CanvasViewport(zoom: 0.8, offsetX: 300, offsetY: 120), in: group.id)
+        model.flushPersistence()
         let loaded = AppModel(storageURL: url)
         XCTAssertEqual(loaded.selectedGroup?.cards[0].color, .green)
         XCTAssertEqual(loaded.projects[0].editor, .cursor)
@@ -65,6 +68,7 @@ final class IntegrationTests: XCTestCase {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let model = AppModel(storageURL: directory.appendingPathComponent("canvas.json"))
+        defer { model.flushPersistence() }
         for name in ["a", "b", "c"] {
             let folder = directory.appendingPathComponent(name)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

@@ -7,9 +7,11 @@ final class AppModelTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("canvas.json")
         let model = AppModel(storageURL: url)
+        defer { model.flushPersistence() }
         let first = model.selectedGroupID
         model.addGroup()
         model.selectedGroupID = first
+        model.flushPersistence()
         XCTAssertEqual(AppModel(storageURL: url).selectedGroupID, first)
     }
 
@@ -21,7 +23,9 @@ final class AppModelTests: XCTestCase {
         let bytes = Data("broken".utf8)
         try bytes.write(to: url)
         let model = AppModel(storageURL: url)
+        defer { model.flushPersistence() }
         model.addGroup()
+        model.flushPersistence()
         XCTAssertEqual(try Data(contentsOf: url), bytes)
         XCTAssertNotNil(model.alertMessage)
     }
@@ -30,6 +34,7 @@ final class AppModelTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let model = AppModel(storageURL: directory.appendingPathComponent("canvas.json"))
+        defer { model.flushPersistence() }
         model.addProject(folderURL: URL(fileURLWithPath: "/tmp"))
         model.addProject(folderURL: URL(fileURLWithPath: "/Applications"))
         let group = try XCTUnwrap(model.selectedGroup)
@@ -49,6 +54,7 @@ final class AppModelTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("canvas.json")
         let model = AppModel(storageURL: url)
+        defer { model.flushPersistence() }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         model.addProject(folderURL: directory)
         let group = try XCTUnwrap(model.selectedGroup)
@@ -63,6 +69,7 @@ final class AppModelTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let model = AppModel(storageURL: directory.appendingPathComponent("canvas.json"))
+        defer { model.flushPersistence() }
         let groupID = try XCTUnwrap(model.selectedGroupID)
         model.addProjects(folderURLs: [directory], to: groupID)
         model.addProjects(folderURLs: [directory], to: groupID)
@@ -74,6 +81,7 @@ final class AppModelTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let model = AppModel(storageURL: directory.appendingPathComponent("canvas.json"))
+        defer { model.flushPersistence() }
         model.addGroup()
         model.deleteGroup(model.selectedGroupID!)
         XCTAssertEqual(model.groups.count, 1)
@@ -89,12 +97,15 @@ final class AppModelTests: XCTestCase {
         let broken = Data("broken".utf8)
         try broken.write(to: url)
         let model = AppModel(storageURL: url)
+        defer { model.flushPersistence() }
         let incoming = directory.appendingPathComponent("import.json")
         try JSONEncoder().encode(ProjectCanvasData.empty).write(to: incoming)
         model.importGroups(from: incoming, pathFrom: "", pathTo: "")
         XCTAssertFalse(model.needsRecovery)
+        model.flushPersistence()
         XCTAssertNoThrow(try CanvasStorage.decode(Data(contentsOf: url)))
         let preserved = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first { $0.lastPathComponent.contains("preserved-") }
+        model.flushPersistence()
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(preserved)), broken)
     }
 

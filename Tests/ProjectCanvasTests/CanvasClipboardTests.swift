@@ -50,6 +50,7 @@ final class CanvasClipboardTests: XCTestCase {
             XCTAssertEqual(model.selectedGroup?.cards.first, projectCard)
             model.clipboardHistory.clearTexts()
             model.moveCard(contentCard.id, to: CGPoint(x: 900, y: 500), in: groupID)
+            model.flushPersistence()
             let stored = try CanvasStorage.decode(Data(contentsOf: url))
             XCTAssertEqual(stored.groups.first?.cards.last?.x, 900)
             XCTAssertEqual(stored.groups.first?.cards.last?.clipboard, .text(item.text))
@@ -84,6 +85,7 @@ final class CanvasClipboardTests: XCTestCase {
             model.undo()
             XCTAssertEqual(model.selectedGroup?.cards.count, 2)
             XCTAssertEqual(model.selectedGroup?.connections.count, 1)
+            model.flushPersistence()
             _ = try CanvasStorage.decode(Data(contentsOf: url))
         }
     }
@@ -107,6 +109,7 @@ final class CanvasClipboardTests: XCTestCase {
             XCTAssertEqual(imported.connections.first?.fromCardID, imported.cards.first?.id)
             XCTAssertEqual(imported.connections.first?.toCardID, imported.cards.last?.id)
             XCTAssertTrue(imported.cards.allSatisfy { $0.projectID == nil })
+            model.flushPersistence()
             _ = try CanvasStorage.decode(Data(contentsOf: url))
         }
     }

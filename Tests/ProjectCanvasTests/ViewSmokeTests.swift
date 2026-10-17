@@ -29,6 +29,7 @@ final class ViewSmokeTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let model = AppModel(storageURL: directory.appendingPathComponent("canvas.json"))
+        defer { model.flushPersistence() }
         model.addProjects(folderURLs: [directory], to: model.selectedGroupID!)
         let group = model.selectedGroup!
         model.setCardColor(.blue, ids: [group.cards[0].id], in: group.id)
@@ -58,6 +59,7 @@ final class ViewSmokeTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let model = AppModel(storageURL: directory.appendingPathComponent("canvas.json"))
+        defer { model.flushPersistence() }
         model.addProject(folderURL: directory)
         let group = try XCTUnwrap(model.selectedGroup)
         let viewport = CGSize(width: 3000, height: 1600)
@@ -80,6 +82,7 @@ final class ViewSmokeTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let model = AppModel(storageURL: directory.appendingPathComponent("canvas.json"))
+        defer { model.flushPersistence() }
         let groupID = try XCTUnwrap(model.selectedGroupID)
         let committed = expectation(description: "pending viewport committed after teardown")
         let view = CanvasScrollView(size: CGSize(width: 1200, height: 800), offset: .constant(.zero), onViewportCommit: { position in
@@ -96,6 +99,7 @@ final class ViewSmokeTests: XCTestCase {
         model.addGroup()
         type(of: view).dismantleNSView(scroll, coordinator: coordinator)
         await fulfillment(of: [committed], timeout: 1)
+        model.flushPersistence()
         let reopened = AppModel(storageURL: directory.appendingPathComponent("canvas.json"))
         XCTAssertEqual(reopened.groups.first(where: { $0.id == groupID })?.viewport?.offsetX, 220)
         XCTAssertEqual(reopened.groups.first(where: { $0.id == groupID })?.viewport?.offsetY, 130)
